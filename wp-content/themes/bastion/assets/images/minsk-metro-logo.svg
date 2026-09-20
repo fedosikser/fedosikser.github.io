@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 148.462 147.737" role="img" aria-label="Минский метрополитен">
+  <g transform="translate(-300.588 -471.79)">
+    <ellipse cx="375" cy="545.647" rx="72.731" ry="72.368" fill="#fff" stroke="#e31e25" stroke-width="3"/>
+    <g transform="matrix(.136584 0 0 .134932 152.791 509.724)">
+      <circle cx="1628.269" cy="264.245" r="500" fill="#fff" stroke="#e31e25" stroke-width="17.178"/>
+      <path d="M1198.821 92.465h313.413l116.133 119.378 110.871-119.378h318.479v345.092h-309.816l-118.865 122.086-123.467-122.086h-305.215z" fill="none" stroke="#e31e25" stroke-width="44.197"/>
+      <path d="M1512.734 420.686h-297.042V109.336h296.294l116.381 118.643 111.62-118.643h300.858v311.35h-299.601" fill="#e31e25" stroke="#fff" stroke-width="29.465"/>
+      <path d="m1741.244 420.686-112.978 115.09-115.74-115.09.208-23.754 115.535 115.191 112.975-113.592z" fill="none" stroke="#fff" stroke-width="22.099"/>
+    </g>
+    <path d="m369.723 570.912-5.425-5.292 21.685-.01-6.418 6.62-4.118 3.975z" fill="#e31e25" stroke="#e31e25" stroke-width=".5"/>
+  </g>
+</svg>
