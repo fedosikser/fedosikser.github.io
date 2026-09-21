@@ -21429,3 +21429,71 @@ body.home .collection-catalog-footer a {
 
   body.bastion-catalog-page .catalog-inline-reset { grid-column: 6; }
 }
+
+/* Search overlay exposes the same ordering control as the inline catalogue bar. */
+body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price > .catalog-overlay-order {
+  display: grid;
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  min-height: 38px;
+  grid-column: 3;
+  grid-row: 1;
+  padding: 0;
+  border-radius: 50%;
+  place-items: center;
+}
+
+@media (min-width: 621px) {
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price {
+    width: min(100%, 746px);
+    grid-template-columns: auto minmax(180px, 1fr) repeat(3, 38px) 82px;
+  }
+
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price > button[data-catalog-sort] { grid-area: 1 / 4; }
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price > .catalog-grid-toggle { grid-column: 5; }
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-reset { grid-column: 6; }
+}
+
+@media (max-width: 620px) {
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price {
+    grid-template-columns: minmax(0, 1fr) repeat(2, 36px);
+  }
+
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price > .catalog-price-range {
+    grid-column: 1;
+  }
+
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price > .catalog-overlay-order {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    grid-column: 2;
+  }
+
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price > .catalog-inline-sort { grid-column: 3; }
+  body.bastion-catalog-page .catalog-tools-overlay .catalog-overlay-price > .catalog-grid-toggle { display: none; }
+
+  body.home .collection-grid.is-looping {
+    cursor: grab;
+  }
+
+  body.home .collection-grid.is-looping.is-interacting {
+    cursor: grabbing;
+    user-select: none;
+  }
+
+  body.home .collection-grid.is-looping .collection-card,
+  body.home .collection-grid.is-looping .collection-card img {
+    -webkit-user-drag: none;
+  }
+
+  /* Bring the resting catalogue search controls closer to their underline. */
+  body.bastion-catalog-page .catalog-inline-tools > .catalog-inline-search > label > .icon,
+  body.bastion-catalog-page .catalog-inline-tools > .catalog-inline-search input,
+  body.bastion-catalog-page .catalog-inline-tools > .catalog-inline-search > .catalog-inline-search-submit,
+  body.bastion-catalog-page .catalog-inline-tools > .catalog-inline-search > .catalog-inline-search-clear {
+    transform: translateY(3px);
+  }
+}

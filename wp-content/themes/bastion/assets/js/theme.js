@@ -1247,6 +1247,12 @@ document.addEventListener("DOMContentLoaded", () => {
       let initialized = false;
       let collectionPosition = 0;
       let needsPositionSync = false;
+      let collectionScrollFrame = 0;
+      let dragPointerId = null;
+      let dragStartX = 0;
+      let dragStartScrollLeft = 0;
+      let dragHasMoved = false;
+      let suppressCollectionClick = false;
 
       const normalizePosition = (position) => {
         if (!cycleWidth) return position;
@@ -1269,12 +1275,6 @@ document.addEventListener("DOMContentLoaded", () => {
         collectionPosition = normalizePosition(collectionPosition + distance);
         homeCollectionStream.scrollLeft = collectionPosition;
       };
-      const settleCollection = () => {
-        if (!cycleWidth) return;
-        collectionPosition = normalizePosition(homeCollectionStream.scrollLeft);
-        homeCollectionStream.scrollLeft = collectionPosition;
-      };
-
       measureCycle();
       const resizeObserver = "ResizeObserver" in window ? new ResizeObserver(measureCycle) : null;
       resizeObserver?.observe(homeCollectionStream);
@@ -1287,18 +1287,53 @@ document.addEventListener("DOMContentLoaded", () => {
         if (streamIsVisible && !streamIsInteracting && scrollDelta > 0) advanceCollection(scrollDelta * 0.42);
       }, { passive: true, signal: controller.signal });
 
-      homeCollectionStream.addEventListener("pointerdown", () => {
+      homeCollectionStream.addEventListener("pointerdown", (event) => {
         streamIsInteracting = true;
         needsPositionSync = true;
         homeCollectionStream.classList.add("is-interacting");
+        if (event.pointerType === "touch" || event.button !== 0) return;
+        dragPointerId = event.pointerId;
+        dragStartX = event.clientX;
+        dragStartScrollLeft = homeCollectionStream.scrollLeft;
+        dragHasMoved = false;
+        homeCollectionStream.setPointerCapture?.(event.pointerId);
       }, { passive: true, signal: controller.signal });
-      const endCollectionInteraction = () => {
+      homeCollectionStream.addEventListener("pointermove", (event) => {
+        if (event.pointerId !== dragPointerId) return;
+        const distance = event.clientX - dragStartX;
+        if (Math.abs(distance) > 3) dragHasMoved = true;
+        if (!dragHasMoved) return;
+        event.preventDefault();
+        collectionPosition = normalizePosition(dragStartScrollLeft - distance);
+        homeCollectionStream.scrollLeft = collectionPosition;
+      }, { passive: false, signal: controller.signal });
+      homeCollectionStream.addEventListener("scroll", () => {
+        if (collectionScrollFrame) return;
+        collectionScrollFrame = window.requestAnimationFrame(() => {
+          collectionScrollFrame = 0;
+          if (cycleWidth) collectionPosition = normalizePosition(homeCollectionStream.scrollLeft);
+        });
+      }, { passive: true, signal: controller.signal });
+      homeCollectionStream.addEventListener("click", (event) => {
+        if (!suppressCollectionClick) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }, { capture: true, signal: controller.signal });
+      const endCollectionInteraction = (event) => {
         if (!streamIsInteracting) return;
+        if (dragPointerId !== null && (!event || event.pointerId === dragPointerId)) {
+          if (dragHasMoved) {
+            suppressCollectionClick = true;
+            window.setTimeout(() => { suppressCollectionClick = false; }, 250);
+          }
+          if (homeCollectionStream.hasPointerCapture?.(dragPointerId)) homeCollectionStream.releasePointerCapture(dragPointerId);
+          dragPointerId = null;
+          dragHasMoved = false;
+        }
         streamIsInteracting = false;
         pauseUntil = performance.now() + 2400;
         needsPositionSync = true;
         homeCollectionStream.classList.remove("is-interacting");
-        settleCollection();
       };
       window.addEventListener("pointerup", endCollectionInteraction, { passive: true, signal: controller.signal });
       window.addEventListener("pointercancel", endCollectionInteraction, { passive: true, signal: controller.signal });
@@ -1308,7 +1343,8 @@ document.addEventListener("DOMContentLoaded", () => {
         lastFrameTime = frameTime;
         if (streamIsVisible && !streamIsInteracting && !document.hidden && autoplayCollectionLoop.matches && frameTime >= pauseUntil) {
           if (needsPositionSync) {
-            settleCollection();
+            collectionPosition = normalizePosition(homeCollectionStream.scrollLeft);
+            homeCollectionStream.scrollLeft = collectionPosition;
             needsPositionSync = false;
           }
           advanceCollection(elapsed * 0.014);
@@ -1328,6 +1364,7 @@ document.addEventListener("DOMContentLoaded", () => {
         visibilityObserver.disconnect();
         resizeObserver?.disconnect();
         if (animationFrame) window.cancelAnimationFrame(animationFrame);
+        if (collectionScrollFrame) window.cancelAnimationFrame(collectionScrollFrame);
         loopClones.forEach((clone) => clone.remove());
         homeCollectionStream.classList.remove("is-looping", "is-interacting");
         homeCollectionStream.scrollLeft = 0;
@@ -2454,6 +2491,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const grid = catalog.querySelector("[data-catalog-grid]");
     const categoryButtons = Array.from(catalog.querySelectorAll("[data-catalog-category]"));
     const sortButton = catalog.querySelector("[data-catalog-sort]");
+    const orderButton = catalog.querySelector("[data-catalog-order]");
     const searchInput = catalog.querySelector("[data-catalog-search]");
     const searchCloseButtons = Array.from(catalog.querySelectorAll("[data-catalog-search-close]"));
     const searchSubmit = catalog.querySelector("[data-catalog-search-submit]");
@@ -3079,6 +3117,7 @@ document.addEventListener("DOMContentLoaded", () => {
         catalogSearchDraft.category !== ""
         || (searchInput instanceof HTMLInputElement && searchInput.value.trim() !== "")
         || catalogSearchDraft.sort !== ""
+        || catalogSearchDraft.order !== ""
         || catalogSearchDraft.minPrice !== priceFloor
         || catalogSearchDraft.maxPrice !== priceCeiling
       ));
@@ -3109,6 +3148,14 @@ document.addEventListener("DOMContentLoaded", () => {
       inlineOrderButton.setAttribute("aria-pressed", String(activeOrder !== ""));
       inlineOrderButton.setAttribute("aria-label", orderLabels[activeOrder]);
       inlineOrderButton.title = orderLabels[activeOrder].split(".")[0];
+    };
+    const syncOverlayOrder = (order) => {
+      if (!(orderButton instanceof HTMLButtonElement)) return;
+      orderButton.dataset.orderState = order;
+      orderButton.classList.toggle("is-active", order !== "");
+      orderButton.setAttribute("aria-pressed", String(order !== ""));
+      orderButton.setAttribute("aria-label", orderLabels[order]);
+      orderButton.title = orderLabels[order].split(".")[0];
     };
     const syncOverlayCategory = (category) => {
       categoryButtons.forEach((button) => {
@@ -3142,6 +3189,7 @@ document.addEventListener("DOMContentLoaded", () => {
       catalogSearchDraft = {
         category: activeCategory,
         sort: activeSort,
+        order: activeOrder,
         minPrice: activeMinPrice,
         maxPrice: activeMaxPrice,
         search: appliedSearchValue,
@@ -3150,6 +3198,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (searchInput instanceof HTMLInputElement) searchInput.value = appliedSearchValue;
       syncOverlayCategory(catalogSearchDraft.category);
       syncOverlaySort(catalogSearchDraft.sort);
+      syncOverlayOrder(catalogSearchDraft.order);
       syncOverlayPrice(catalogSearchDraft.minPrice, catalogSearchDraft.maxPrice);
       syncOverlayAdvancedControls();
     };
@@ -3163,6 +3212,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (searchInput instanceof HTMLInputElement) searchInput.value = appliedSearchValue;
       syncOverlayCategory(activeCategory);
       syncOverlaySort(activeSort);
+      syncOverlayOrder(activeOrder);
       syncPriceControls();
       syncAdvancedControls();
     };
@@ -3349,6 +3399,7 @@ document.addEventListener("DOMContentLoaded", () => {
         inlineSortButton.title = sortLabels[activeSort];
       }
       syncInlineOrder();
+      if (!catalogSearchDraft) syncOverlayOrder(activeOrder);
       if (inlineSearchInput instanceof HTMLInputElement && document.activeElement !== inlineSearchInput) {
         inlineSearchInput.value = searchInput instanceof HTMLInputElement ? searchInput.value : "";
       }
@@ -3397,6 +3448,14 @@ document.addEventListener("DOMContentLoaded", () => {
     inlineCategoryButtons.forEach((button) => button.addEventListener("click", () => applyCatalogCategory(button.dataset.catalogInlineCategory || "", true, true, true)));
     const cycleCatalogOrder = (sourceButton) => {
       const orderStates = ["", "newest", "popular", "alpha"];
+      if (catalogSearchDraft) {
+        const currentDraftIndex = orderStates.indexOf(catalogSearchDraft.order);
+        catalogSearchDraft.order = orderStates[(currentDraftIndex + 1) % orderStates.length];
+        syncOverlayOrder(catalogSearchDraft.order);
+        syncOverlayAdvancedControls();
+        showCatalogSortStatus(catalogSearchDraft.order || "defaultOrder", sourceButton);
+        return;
+      }
       const currentIndex = orderStates.indexOf(activeOrder);
       activeOrder = orderStates[(currentIndex + 1) % orderStates.length];
       applyCatalogCategory(activeCategory, true, true, true);
@@ -3415,6 +3474,7 @@ document.addEventListener("DOMContentLoaded", () => {
       showCatalogSortStatus(activeSort, sourceButton, activationEvent);
     };
     sortButton?.addEventListener("click", (event) => cycleCatalogSort(sortButton, event));
+    orderButton?.addEventListener("click", () => cycleCatalogOrder(orderButton));
     const applyPriceRange = (minimum, maximum, changedControl, syncUrl, focusFilters = false) => {
       activeMinPrice = clampPrice(minimum, activeMinPrice);
       activeMaxPrice = clampPrice(maximum, activeMaxPrice);
@@ -3552,12 +3612,14 @@ document.addEventListener("DOMContentLoaded", () => {
       if (catalogSearchDraft) {
         catalogSearchDraft.category = "";
         catalogSearchDraft.sort = "";
+        catalogSearchDraft.order = "";
         catalogSearchDraft.minPrice = priceFloor;
         catalogSearchDraft.maxPrice = priceCeiling;
         catalogSearchDraft.search = "";
         if (searchInput instanceof HTMLInputElement) searchInput.value = "";
         syncOverlayCategory("");
         syncOverlaySort("");
+        syncOverlayOrder("");
         syncOverlayPrice(priceFloor, priceCeiling);
         syncOverlayAdvancedControls();
         return;
@@ -3619,6 +3681,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!catalogSearchDraft) beginCatalogSearchDraft();
       activeCategory = catalogSearchDraft.category;
       activeSort = catalogSearchDraft.sort;
+      activeOrder = catalogSearchDraft.order;
       activeMinPrice = catalogSearchDraft.minPrice;
       activeMaxPrice = catalogSearchDraft.maxPrice;
       appliedSearchValue = searchInput.value;
