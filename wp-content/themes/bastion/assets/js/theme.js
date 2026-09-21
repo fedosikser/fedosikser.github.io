@@ -68,6 +68,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const catalogInlineTools = catalogPage?.querySelector("[data-catalog-inline-tools]");
   const catalogScrollTools = document.querySelector("[data-catalog-scroll-tools]");
   const catalogScrollAdvancedToggle = catalogScrollTools?.querySelector("[data-catalog-quick-advanced]");
+  const pageStackingIntros = [...document.querySelectorAll(".page-stacking-intro")]
+    .filter((element) => element instanceof HTMLElement);
   const introHeaderBoundary = catalogIntroBoundary || (document.body.classList.contains("bastion-intro-header")
     ? document.querySelector(".contacts-layout, .privacy-hero, .works-intro, .services-hero, .favorites-intro")
     : null);
@@ -82,8 +84,37 @@ document.addEventListener("DOMContentLoaded", () => {
   let catalogToolsHaveActivated = false;
   let catalogToolsActivationHeight = 0;
   let catalogToolsActivationWidth = 0;
+  let catalogHeaderDirection = "down";
+  let catalogHeaderDirectionCandidate = "down";
+  let catalogHeaderDirectionTravel = 0;
   let pageNavigationPending = false;
   let scrollLockFrame = 0;
+
+  if (pageStackingIntros.length) {
+    let pageStackingResizeFrame = 0;
+    const syncPageStackingOffsets = () => {
+      window.cancelAnimationFrame(pageStackingResizeFrame);
+      pageStackingResizeFrame = window.requestAnimationFrame(() => {
+        pageStackingIntros.forEach((intro) => {
+          const introHeight = intro.getBoundingClientRect().height;
+          const stickyTop = Math.min(0, window.innerHeight - introHeight);
+          intro.style.setProperty("--page-stacking-intro-top", `${Math.floor(stickyTop)}px`);
+        });
+      });
+    };
+
+    syncPageStackingOffsets();
+    window.addEventListener("resize", syncPageStackingOffsets, { passive: true });
+    window.addEventListener("orientationchange", syncPageStackingOffsets, { passive: true });
+    pageStackingIntros.forEach((intro) => intro.querySelectorAll("img").forEach((image) => {
+      if (!image.complete) image.addEventListener("load", syncPageStackingOffsets, { once: true });
+    }));
+    if ("ResizeObserver" in window) {
+      const pageStackingResizeObserver = new ResizeObserver(syncPageStackingOffsets);
+      pageStackingIntros.forEach((intro) => pageStackingResizeObserver.observe(intro));
+    }
+  }
+
   const reconcilePageScrollLocks = () => {
     if (!nav?.classList.contains("is-open")) {
       document.body.classList.remove("menu-open", "menu-closing");
@@ -97,6 +128,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const catalogOverlay = document.querySelector("[data-catalog-tools-overlay]");
     if (!(catalogOverlay instanceof HTMLElement) || catalogOverlay.getAttribute("aria-hidden") !== "false") {
       document.body.classList.remove("catalog-search-active");
+      document.documentElement.classList.remove("catalog-search-active");
     }
   };
   const syncOverscrollSurface = () => {
@@ -223,7 +255,8 @@ document.addEventListener("DOMContentLoaded", () => {
           "catalog-tools-ready",
           "catalog-tools-collapsed",
           "catalog-tools-hovered",
-          "catalog-scroll-advanced-open"
+          "catalog-scroll-advanced-open",
+          "catalog-header-scroll-expanded"
         );
         catalogScrollAdvancedToggle?.setAttribute("aria-expanded", "false");
         if (catalogScrollTools instanceof HTMLElement) {
@@ -282,35 +315,50 @@ document.addEventListener("DOMContentLoaded", () => {
         : 54;
       const compactHeaderThreshold = Math.max(0, introBottom - introHeaderBottom);
       const toolsActivationThreshold = Math.max(0, catalogActivationBoundary - compactHeaderBottom);
-      const compactHeader = mobileCatalog || currentScrollY > compactHeaderThreshold;
-      if (currentScrollY >= toolsActivationThreshold) catalogToolsHaveActivated = true;
+      const meaningfulCatalogMovement = Math.abs(movement) > 0.25;
+      if (meaningfulCatalogMovement) {
+        const nextDirection = movement < 0 ? "up" : "down";
+        if (nextDirection !== catalogHeaderDirectionCandidate) {
+          catalogHeaderDirectionCandidate = nextDirection;
+          catalogHeaderDirectionTravel = Math.abs(movement);
+        } else {
+          catalogHeaderDirectionTravel += Math.abs(movement);
+        }
+        if (catalogHeaderDirectionTravel >= 8) {
+          catalogHeaderDirection = catalogHeaderDirectionCandidate;
+          catalogHeaderDirectionTravel = 0;
+        }
+      }
+      const isPastCatalogHeaderThreshold = currentScrollY > compactHeaderThreshold;
+      const compactHeader = isPastCatalogHeaderThreshold;
+      if (!isPastCatalogHeaderThreshold) {
+        catalogToolsHaveActivated = false;
+      } else if (currentScrollY >= toolsActivationThreshold) {
+        catalogToolsHaveActivated = true;
+      }
       const toolsReady = catalogToolsHaveActivated;
-      const toolsWereReady = document.body.classList.contains("catalog-tools-ready");
+      const showToolsOnReturn = toolsReady
+        && isPastCatalogHeaderThreshold
+        && catalogHeaderDirection === "up";
 
       document.body.classList.toggle("catalog-header-compact", compactHeader);
+      document.body.classList.remove("catalog-header-scroll-expanded");
       document.body.classList.toggle("catalog-tools-ready", toolsReady);
+      window.cancelAnimationFrame(catalogToolsCollapseFrame);
+      catalogToolsCollapseFrame = 0;
       if (!toolsReady) {
-        window.cancelAnimationFrame(catalogToolsCollapseFrame);
-        catalogToolsCollapseFrame = 0;
+        document.body.classList.remove(
+          "catalog-tools-collapsed",
+          "catalog-tools-hovered",
+          "catalog-scroll-advanced-open"
+        );
+        catalogScrollAdvancedToggle?.setAttribute("aria-expanded", "false");
+      } else if (!showToolsOnReturn) {
         document.body.classList.remove("catalog-tools-hovered");
         document.body.classList.add("catalog-tools-collapsed");
         document.body.classList.remove("catalog-scroll-advanced-open");
         catalogScrollAdvancedToggle?.setAttribute("aria-expanded", "false");
-      } else if (!toolsWereReady) {
-        window.cancelAnimationFrame(catalogToolsCollapseFrame);
-        document.body.classList.add("catalog-tools-collapsed");
-        catalogToolsCollapseFrame = window.requestAnimationFrame(() => {
-          catalogToolsCollapseFrame = 0;
-          if (!document.body.classList.contains("catalog-tools-ready")) return;
-          document.body.classList.remove("catalog-tools-collapsed");
-          if (catalogScrollTools instanceof HTMLElement) {
-            catalogScrollTools.setAttribute("aria-hidden", "false");
-            catalogScrollTools.inert = false;
-          }
-        });
       } else {
-        window.cancelAnimationFrame(catalogToolsCollapseFrame);
-        catalogToolsCollapseFrame = 0;
         document.body.classList.remove("catalog-tools-collapsed");
       }
 
@@ -645,8 +693,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const deliveryCourier = deliveryMap?.querySelector("[data-delivery-custom-courier]");
   const deliveryCity = deliveryMap?.querySelector("[data-delivery-custom-city]");
   const deliveryCityLabel = deliveryCity?.querySelector("[data-delivery-custom-city-label]");
+  const deliveryCityLabelBackground = deliveryCity?.querySelector("[data-delivery-custom-city-label-bg]");
 
-  if (deliveryCityForm instanceof HTMLFormElement && deliveryMap && deliveryRoute instanceof SVGPathElement && deliveryCourier instanceof SVGCircleElement && deliveryCity instanceof SVGGElement && deliveryCityLabel instanceof SVGTextElement) {
+  if (deliveryCityForm instanceof HTMLFormElement && deliveryMap && deliveryRoute instanceof SVGPathElement && deliveryCourier instanceof SVGCircleElement && deliveryCity instanceof SVGGElement && deliveryCityLabel instanceof SVGTextElement && deliveryCityLabelBackground instanceof SVGRectElement) {
     const input = deliveryCityForm.querySelector("input");
     const submit = deliveryCityForm.querySelector("button[type='submit']");
     const submitLabel = deliveryCityForm.querySelector("[data-delivery-submit-label]");
@@ -732,6 +781,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       if (directDistance < 8) {
         deliveryMap.classList.remove("has-custom-route");
+        deliveryMap.classList.add("has-search-result");
         setSearchState("success", "Отлично, доставим в ваш город");
         revealDeliveryMap();
         return;
@@ -744,10 +794,10 @@ document.addEventListener("DOMContentLoaded", () => {
       deliveryRoute.setAttribute("d", `M${origin.x} ${origin.y}Q${controlX.toFixed(1)} ${controlY.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`);
       deliveryCity.setAttribute("transform", `translate(${target.x.toFixed(1)} ${target.y.toFixed(1)})`);
       deliveryCityLabel.textContent = record.name;
-      const labelOnLeft = target.x > 455;
-      deliveryCityLabel.setAttribute("x", labelOnLeft ? "-12" : "12");
-      deliveryCityLabel.setAttribute("y", target.y > 430 ? "-13" : "-14");
-      deliveryCityLabel.setAttribute("text-anchor", labelOnLeft ? "end" : "start");
+      const labelWidth = Math.max(54, Math.min(116, Math.ceil(deliveryCityLabel.getComputedTextLength() + 20)));
+      deliveryCityLabelBackground.setAttribute("x", `${-labelWidth / 2}`);
+      deliveryCityLabelBackground.setAttribute("width", `${labelWidth}`);
+      deliveryMap.classList.add("has-search-result");
       deliveryMap.classList.add("has-custom-route");
 
       window.cancelAnimationFrame(courierAnimationFrame);
@@ -894,7 +944,7 @@ document.addEventListener("DOMContentLoaded", () => {
       requestController?.abort();
       requestController = null;
       window.cancelAnimationFrame(courierAnimationFrame);
-      deliveryMap.classList.remove("has-custom-route");
+      deliveryMap.classList.remove("has-custom-route", "has-search-result");
       deliveryRoute.setAttribute("d", "");
       deliveryRoute.style.removeProperty("stroke-dasharray");
       deliveryRoute.style.removeProperty("stroke-dashoffset");
@@ -1024,6 +1074,9 @@ document.addEventListener("DOMContentLoaded", () => {
         clone.style.setProperty("--review-card-bg", cardStyles.getPropertyValue("--review-card-bg"));
         clone.style.setProperty("--review-card-ink", cardStyles.getPropertyValue("--review-card-ink"));
         clone.setAttribute("aria-hidden", "true");
+        clone.querySelectorAll("button, a, input, select, textarea, [tabindex]").forEach((control) => {
+          control.setAttribute("tabindex", "-1");
+        });
         clearGenericReveal(clone);
         homeReviewStream.append(clone);
       });
@@ -1055,7 +1108,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const currentScrollY = window.scrollY;
         const scrollDelta = currentScrollY - lastPageScrollY;
         lastPageScrollY = currentScrollY;
-        if (streamIsVisible && !streamIsInteracting) advanceStream(scrollDelta * 0.34);
+        if (streamIsVisible && !streamIsInteracting && !homeReviewStream.querySelector("[data-review-flip].is-flipped")) {
+          advanceStream(scrollDelta * 0.34);
+        }
       }, { passive: true });
 
       homeReviewStream.addEventListener("pointerdown", () => {
@@ -1072,7 +1127,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const animateStream = (frameTime) => {
         const elapsed = Math.min(frameTime - lastFrameTime, 50);
         lastFrameTime = frameTime;
-        if (streamIsVisible && !streamIsInteracting && !document.hidden) {
+        if (streamIsVisible && !streamIsInteracting && !document.hidden && !homeReviewStream.querySelector("[data-review-flip].is-flipped")) {
           advanceStream(elapsed * 0.016);
         }
         streamAnimationFrame = streamIsVisible ? window.requestAnimationFrame(animateStream) : 0;
@@ -1084,6 +1139,207 @@ document.addEventListener("DOMContentLoaded", () => {
         streamAnimationFrame = window.requestAnimationFrame(animateStream);
       }, { rootMargin: "25% 0px", threshold: 0.01 }).observe(homeReviewStream);
     }
+  }
+
+  const reviewFlipCards = Array.from(document.querySelectorAll("[data-review-flip]"));
+  if (reviewFlipCards.length) {
+    const setReviewFlipState = (card, flipped) => {
+      card.classList.toggle("is-flipped", flipped);
+      const front = card.querySelector(".review-flip-front");
+      const back = card.querySelector(".review-flip-back");
+      const toggle = card.querySelector(".review-flip-toggle");
+      front?.setAttribute("aria-hidden", String(flipped));
+      back?.setAttribute("aria-hidden", String(!flipped));
+      if (toggle instanceof HTMLButtonElement) {
+        toggle.setAttribute("aria-pressed", String(flipped));
+        toggle.setAttribute("aria-label", flipped ? "Вернуться к отзыву" : "Показать фотографию проекта");
+      }
+    };
+
+    const prepareReviewPhoto = (card) => {
+      const image = card.querySelector(".review-flip-back img");
+      if (!(image instanceof HTMLImageElement)) return;
+      image.loading = "eager";
+      if (image.complete && image.naturalWidth > 0) return;
+      image.decode?.().catch(() => {});
+    };
+
+    reviewFlipCards.forEach((card) => {
+      const toggle = card.querySelector(".review-flip-toggle");
+      if (!(toggle instanceof HTMLButtonElement)) return;
+      card.addEventListener("pointerenter", () => prepareReviewPhoto(card), { once: true });
+      toggle.addEventListener("focus", () => prepareReviewPhoto(card), { once: true });
+      toggle.addEventListener("click", () => {
+        const nextState = !card.classList.contains("is-flipped");
+        if (nextState) {
+          reviewFlipCards.forEach((otherCard) => {
+            if (otherCard !== card) setReviewFlipState(otherCard, false);
+          });
+          prepareReviewPhoto(card);
+        }
+        setReviewFlipState(card, nextState);
+      });
+      if (card.closest(".works-page")) {
+        card.addEventListener("click", (event) => {
+          const eventTarget = event.target;
+          if (!(eventTarget instanceof Element) || eventTarget.closest(".review-flip-toggle")) return;
+          if (window.getSelection()?.toString().trim()) return;
+          toggle.click();
+        });
+      }
+      card.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape" || !card.classList.contains("is-flipped")) return;
+        setReviewFlipState(card, false);
+        toggle.focus({ preventScroll: true });
+      });
+      setReviewFlipState(card, false);
+    });
+  }
+
+  const homeCollectionStream = document.querySelector("body.home .collection-grid");
+  if (homeCollectionStream instanceof HTMLElement) {
+    const mobileCollectionLoop = window.matchMedia("(max-width: 620px)");
+    const autoplayCollectionLoop = window.matchMedia("(prefers-reduced-motion: no-preference)");
+    const originalCollectionCards = Array.from(homeCollectionStream.children).filter((card) => card instanceof HTMLElement);
+    let disposeCollectionLoop = null;
+
+    const clearCollectionReveal = (card) => {
+      card.classList.remove("reveal-block", "reveal-media", "is-revealed");
+      card.style.removeProperty("--reveal-delay");
+      card.querySelectorAll(".reveal-block, .reveal-media, .is-revealed").forEach((element) => {
+        element.classList.remove("reveal-block", "reveal-media", "is-revealed");
+        element.style.removeProperty("--reveal-delay");
+      });
+    };
+
+    const setupCollectionLoop = () => {
+      if (!mobileCollectionLoop.matches || originalCollectionCards.length < 2) return null;
+
+      const controller = new AbortController();
+      const beforeFragment = document.createDocumentFragment();
+      const afterFragment = document.createDocumentFragment();
+      const loopClones = [];
+      originalCollectionCards.forEach((card) => {
+        const beforeClone = card.cloneNode(true);
+        const afterClone = card.cloneNode(true);
+        [beforeClone, afterClone].forEach((clone) => {
+          clone.dataset.collectionLoopClone = "true";
+          clone.setAttribute("aria-hidden", "true");
+          clone.tabIndex = -1;
+          clearCollectionReveal(clone);
+          loopClones.push(clone);
+        });
+        beforeFragment.append(beforeClone);
+        afterFragment.append(afterClone);
+      });
+      homeCollectionStream.insertBefore(beforeFragment, originalCollectionCards[0]);
+      homeCollectionStream.append(afterFragment);
+      homeCollectionStream.classList.add("is-looping");
+
+      let cycleStart = 0;
+      let cycleWidth = 0;
+      let streamIsVisible = false;
+      let streamIsInteracting = false;
+      let pauseUntil = 0;
+      let lastPageScrollY = window.scrollY;
+      let lastFrameTime = performance.now();
+      let animationFrame = 0;
+      let initialized = false;
+      let collectionPosition = 0;
+      let needsPositionSync = false;
+
+      const normalizePosition = (position) => {
+        if (!cycleWidth) return position;
+        while (position >= cycleStart + cycleWidth) position -= cycleWidth;
+        while (position < cycleStart) position += cycleWidth;
+        return position;
+      };
+      const measureCycle = () => {
+        const afterFirst = homeCollectionStream.children[originalCollectionCards.length * 2];
+        const previousOffset = cycleWidth ? normalizePosition(collectionPosition) - cycleStart : 0;
+        cycleStart = originalCollectionCards[0].offsetLeft;
+        cycleWidth = afterFirst instanceof HTMLElement ? afterFirst.offsetLeft - cycleStart : 0;
+        if (!cycleWidth) return;
+        collectionPosition = initialized ? cycleStart + Math.max(0, Math.min(previousOffset, cycleWidth - 1)) : cycleStart;
+        homeCollectionStream.scrollLeft = collectionPosition;
+        initialized = true;
+      };
+      const advanceCollection = (distance) => {
+        if (!cycleWidth || !distance) return;
+        collectionPosition = normalizePosition(collectionPosition + distance);
+        homeCollectionStream.scrollLeft = collectionPosition;
+      };
+      const settleCollection = () => {
+        if (!cycleWidth) return;
+        collectionPosition = normalizePosition(homeCollectionStream.scrollLeft);
+        homeCollectionStream.scrollLeft = collectionPosition;
+      };
+
+      measureCycle();
+      const resizeObserver = "ResizeObserver" in window ? new ResizeObserver(measureCycle) : null;
+      resizeObserver?.observe(homeCollectionStream);
+      if (!resizeObserver) window.addEventListener("resize", measureCycle, { passive: true, signal: controller.signal });
+
+      window.addEventListener("scroll", () => {
+        const currentScrollY = window.scrollY;
+        const scrollDelta = currentScrollY - lastPageScrollY;
+        lastPageScrollY = currentScrollY;
+        if (streamIsVisible && !streamIsInteracting && scrollDelta > 0) advanceCollection(scrollDelta * 0.42);
+      }, { passive: true, signal: controller.signal });
+
+      homeCollectionStream.addEventListener("pointerdown", () => {
+        streamIsInteracting = true;
+        needsPositionSync = true;
+        homeCollectionStream.classList.add("is-interacting");
+      }, { passive: true, signal: controller.signal });
+      const endCollectionInteraction = () => {
+        if (!streamIsInteracting) return;
+        streamIsInteracting = false;
+        pauseUntil = performance.now() + 2400;
+        needsPositionSync = true;
+        homeCollectionStream.classList.remove("is-interacting");
+        settleCollection();
+      };
+      window.addEventListener("pointerup", endCollectionInteraction, { passive: true, signal: controller.signal });
+      window.addEventListener("pointercancel", endCollectionInteraction, { passive: true, signal: controller.signal });
+
+      const animateCollection = (frameTime) => {
+        const elapsed = Math.min(frameTime - lastFrameTime, 50);
+        lastFrameTime = frameTime;
+        if (streamIsVisible && !streamIsInteracting && !document.hidden && autoplayCollectionLoop.matches && frameTime >= pauseUntil) {
+          if (needsPositionSync) {
+            settleCollection();
+            needsPositionSync = false;
+          }
+          advanceCollection(elapsed * 0.014);
+        }
+        animationFrame = streamIsVisible ? window.requestAnimationFrame(animateCollection) : 0;
+      };
+      const visibilityObserver = new IntersectionObserver(([entry]) => {
+        streamIsVisible = entry.isIntersecting;
+        if (!streamIsVisible || animationFrame) return;
+        lastFrameTime = performance.now();
+        animationFrame = window.requestAnimationFrame(animateCollection);
+      }, { rootMargin: "25% 0px", threshold: 0.01 });
+      visibilityObserver.observe(homeCollectionStream);
+
+      return () => {
+        controller.abort();
+        visibilityObserver.disconnect();
+        resizeObserver?.disconnect();
+        if (animationFrame) window.cancelAnimationFrame(animationFrame);
+        loopClones.forEach((clone) => clone.remove());
+        homeCollectionStream.classList.remove("is-looping", "is-interacting");
+        homeCollectionStream.scrollLeft = 0;
+      };
+    };
+
+    const syncCollectionLoop = () => {
+      disposeCollectionLoop?.();
+      disposeCollectionLoop = setupCollectionLoop();
+    };
+    mobileCollectionLoop.addEventListener("change", syncCollectionLoop);
+    syncCollectionLoop();
   }
 
   const reviewLetterCards = document.querySelectorAll("[data-review-initial]");
@@ -1474,10 +1730,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.querySelectorAll("[data-product-accordions]").forEach((group) => {
     const items = Array.from(group.querySelectorAll(".product-accordion"));
+    const mobileAccordion = window.matchMedia("(max-width: 620px)");
     const setAccordionOpen = (item, open) => {
       const button = item.querySelector("[data-product-accordion-toggle]");
       const panel = item.querySelector("[data-product-accordion-panel]");
       if (!(button instanceof HTMLButtonElement) || !(panel instanceof HTMLElement)) return;
+      const wasOpen = button.getAttribute("aria-expanded") === "true" && !panel.hidden;
+      if (wasOpen === open) return;
+
+      const currentHeight = panel.hidden ? 0 : panel.getBoundingClientRect().height;
       panel.getAnimations().forEach((animation) => animation.cancel());
       button.setAttribute("aria-expanded", String(open));
       item.classList.toggle("is-open", open);
@@ -1485,6 +1746,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (reducedMotion.matches) {
         panel.style.height = "";
         panel.style.opacity = "";
+        panel.style.willChange = "";
         panel.hidden = !open;
         return;
       }
@@ -1493,11 +1755,12 @@ document.addEventListener("DOMContentLoaded", () => {
         panel.hidden = false;
         panel.style.height = "auto";
         const height = panel.scrollHeight;
+        panel.style.willChange = "height";
         const animation = panel.animate([
-          { height: "0px", opacity: 0 },
-          { height: `${height}px`, opacity: 1 },
+          { height: `${Math.min(currentHeight, height)}px` },
+          { height: `${height}px` },
         ], {
-          duration: 380,
+          duration: mobileAccordion.matches ? 260 : 360,
           easing: "cubic-bezier(0.22, 0.8, 0.2, 1)",
           fill: "both",
         });
@@ -1506,16 +1769,17 @@ document.addEventListener("DOMContentLoaded", () => {
           animation.cancel();
           panel.style.height = "";
           panel.style.opacity = "";
+          panel.style.willChange = "";
         }).catch(() => {});
         return;
       }
 
-      const height = panel.getBoundingClientRect().height;
+      panel.style.willChange = "height";
       const animation = panel.animate([
-        { height: `${height}px`, opacity: 1 },
-        { height: "0px", opacity: 0 },
+        { height: `${currentHeight}px` },
+        { height: "0px" },
       ], {
-        duration: 320,
+        duration: mobileAccordion.matches ? 210 : 300,
         easing: "cubic-bezier(0.22, 0.8, 0.2, 1)",
         fill: "both",
       });
@@ -1525,6 +1789,7 @@ document.addEventListener("DOMContentLoaded", () => {
         panel.hidden = true;
         panel.style.height = "";
         panel.style.opacity = "";
+        panel.style.willChange = "";
       }).catch(() => {});
     };
 
@@ -1639,7 +1904,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const lightboxImage = gallery.querySelector("[data-gallery-lightbox-image]");
     const lightboxPrevious = gallery.querySelector("[data-gallery-lightbox-prev]");
     const lightboxNext = gallery.querySelector("[data-gallery-lightbox-next]");
-    const lightboxClose = gallery.querySelector("[data-gallery-lightbox-close]");
+    const lightboxCloseButtons = Array.from(gallery.querySelectorAll("[data-gallery-lightbox-close]"));
     const lightboxThumbnails = Array.from(gallery.querySelectorAll("[data-gallery-lightbox-thumb]"));
     const lightboxThumbnailTrack = lightbox.querySelector(".gallery-lightbox-thumbnails");
     const lightboxCurrent = gallery.querySelector("[data-gallery-lightbox-current]");
@@ -1660,8 +1925,10 @@ document.addEventListener("DOMContentLoaded", () => {
     let suppressLightboxClick = false;
     let thumbnailOverflowFrame = 0;
     let galleryScrollFrame = 0;
+    let galleryZoomFrame = 0;
     let galleryAutoplayTimer = 0;
     let activeGallerySlideIndex = 0;
+    let zoomedGallerySlideIndex = -1;
     let galleryIsVisible = true;
     let galleryIsInteracting = false;
     let galleryGestureStartX = 0;
@@ -1674,7 +1941,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const gallerySwipeLearnedKey = "bastion-product-gallery-swipe-learned-v3";
     const gallerySwipeLearnedCookie = "bastion_gallery_swipe_learned_v3";
 
-    if (!viewport || galleryImages.length === 0 || !lightbox || !lightboxImage || !lightboxClose) return;
+    if (!viewport || galleryImages.length === 0 || !lightbox || !lightboxImage || lightboxCloseButtons.length === 0) return;
     if (gallerySwipeHint instanceof HTMLElement) document.body.append(gallerySwipeHint);
     if (lightbox) document.body.append(lightbox);
 
@@ -1702,16 +1969,43 @@ document.addEventListener("DOMContentLoaded", () => {
       }, reducedMotion.matches ? 0 : 320);
     };
 
+    const syncGallerySwipeHintVisibility = () => {
+      if (!(gallerySwipeHint instanceof HTMLElement)) return;
+      const showGallerySwipeHint = mobileGalleryLayout.matches
+        && gallerySlides.length > 1
+        && galleryIsVisible
+        && !hasLearnedGallerySwipe();
+      gallerySwipeHint.hidden = !showGallerySwipeHint;
+      if (showGallerySwipeHint) gallerySwipeHint.classList.remove("is-dismissed");
+      document.body.classList.toggle("product-gallery-hint-visible", showGallerySwipeHint);
+    };
+
     if (gallerySwipeHint instanceof HTMLElement) {
       gallerySwipeHint.classList.remove("is-dismissed");
-      const showGallerySwipeHint = mobileGalleryLayout.matches && gallerySlides.length > 1 && !hasLearnedGallerySwipe();
-      gallerySwipeHint.hidden = !showGallerySwipeHint;
-      document.body.classList.toggle("product-gallery-hint-visible", showGallerySwipeHint);
+      gallerySwipeHint.addEventListener("click", dismissGallerySwipeHint);
+      syncGallerySwipeHintVisibility();
     }
 
     const stopGalleryAutoplay = () => {
       window.clearTimeout(galleryAutoplayTimer);
       galleryAutoplayTimer = 0;
+    };
+
+    const syncGalleryZoom = (slideIndex) => {
+      if (!mobileGalleryLayout.matches || !canAutoplay.matches) {
+        gallerySlides.forEach((slide) => slide.classList.remove("is-gallery-zooming"));
+        zoomedGallerySlideIndex = -1;
+        return;
+      }
+      if (slideIndex === zoomedGallerySlideIndex) return;
+      zoomedGallerySlideIndex = slideIndex;
+      window.cancelAnimationFrame(galleryZoomFrame);
+      gallerySlides.forEach((slide) => slide.classList.remove("is-gallery-zooming"));
+      galleryZoomFrame = window.requestAnimationFrame(() => {
+        galleryZoomFrame = window.requestAnimationFrame(() => {
+          gallerySlides[slideIndex]?.classList.add("is-gallery-zooming");
+        });
+      });
     };
 
     const syncGalleryPagination = () => {
@@ -1726,6 +2020,7 @@ document.addEventListener("DOMContentLoaded", () => {
         galleryDots.forEach((dot, dotIndex) => {
           dot.setAttribute("aria-current", dotIndex === activeGallerySlideIndex ? "true" : "false");
         });
+        syncGalleryZoom(activeGallerySlideIndex);
       });
     };
 
@@ -1824,15 +2119,15 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.addEventListener("visibilitychange", scheduleGalleryAutoplay);
     mobileGalleryLayout.addEventListener("change", () => {
-      const showGallerySwipeHint = mobileGalleryLayout.matches && gallerySlides.length > 1 && !hasLearnedGallerySwipe();
-      if (gallerySwipeHint instanceof HTMLElement) gallerySwipeHint.hidden = !showGallerySwipeHint;
-      document.body.classList.toggle("product-gallery-hint-visible", showGallerySwipeHint);
+      syncGallerySwipeHintVisibility();
       syncGalleryPagination();
+      syncGalleryZoom(activeGallerySlideIndex);
       scheduleGalleryAutoplay();
     });
     if ("IntersectionObserver" in window) {
       const galleryVisibilityObserver = new IntersectionObserver(([entry]) => {
         galleryIsVisible = Boolean(entry?.isIntersecting);
+        syncGallerySwipeHintVisibility();
         scheduleGalleryAutoplay();
       }, { threshold: 0.2 });
       galleryVisibilityObserver.observe(viewport);
@@ -1919,7 +2214,10 @@ document.addEventListener("DOMContentLoaded", () => {
       syncLightboxImage();
       document.body.classList.add("gallery-lightbox-open");
       syncLightboxThumbnailOverflow();
-      window.requestAnimationFrame(() => lightboxClose.focus({ preventScroll: true }));
+      window.requestAnimationFrame(() => {
+        const visibleCloseButton = lightboxCloseButtons.find((button) => button.getClientRects().length > 0);
+        visibleCloseButton?.focus({ preventScroll: true });
+      });
     };
 
     const showLightboxImage = (requestedIndex) => {
@@ -1951,7 +2249,7 @@ document.addEventListener("DOMContentLoaded", () => {
     lightboxThumbnails.forEach((thumbnail, thumbnailIndex) => {
       thumbnail.addEventListener("click", () => showLightboxImage(thumbnailIndex));
     });
-    lightboxClose?.addEventListener("click", closeLightbox);
+    lightboxCloseButtons.forEach((button) => button.addEventListener("click", closeLightbox));
     lightbox?.addEventListener("click", (event) => {
       if (suppressLightboxClick) return;
       if (event.target === lightbox || event.target === lightboxFigure) closeLightbox();
@@ -2161,6 +2459,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const searchSubmit = catalog.querySelector("[data-catalog-search-submit]");
     const searchClear = catalog.querySelector("[data-catalog-search-clear]");
     const searchOverlay = catalog.querySelector("[data-catalog-tools-overlay]");
+    const searchDialog = searchOverlay?.querySelector(".catalog-tools-dialog");
     const advancedToggle = catalog.querySelector("[data-catalog-advanced-toggle]");
     const advancedPanel = catalog.querySelector("[data-catalog-advanced-panel]");
     const advancedReset = catalog.querySelector("[data-catalog-advanced-reset]");
@@ -2169,11 +2468,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const gridToggle = catalog.querySelector("[data-catalog-grid-toggle]");
     const advancedOptions = Array.from(catalog.querySelectorAll("[data-catalog-advanced-option]"));
     const inlineSearchInput = catalog.querySelector("[data-catalog-inline-search]");
+    const inlineTools = catalog.querySelector("[data-catalog-inline-tools]");
     const inlineSearchSubmit = catalog.querySelector("[data-catalog-inline-search-submit]");
     const inlineSearchClear = catalog.querySelector("[data-catalog-inline-search-clear]");
     const inlineReset = catalog.querySelector("[data-catalog-inline-reset]");
     const inlineCategoryButtons = Array.from(catalog.querySelectorAll("[data-catalog-inline-category]"));
     const inlineFilterButtons = Array.from(catalog.querySelectorAll("[data-catalog-inline-filter]"));
+    const inlineOrderButton = catalog.querySelector("[data-catalog-inline-order]");
     const inlineSortButton = catalog.querySelector("[data-catalog-inline-sort]");
     const inlineGridToggle = catalog.querySelector("[data-catalog-inline-grid]");
     const inlineAdvancedToggle = catalog.querySelector("[data-catalog-inline-advanced-toggle]");
@@ -2209,6 +2510,216 @@ document.addEventListener("DOMContentLoaded", () => {
     const loadMoreWrap = loadMoreButton?.closest(".catalog-load-more");
     if (!grid || categoryButtons.length === 0) return;
 
+    let catalogOverlayScrollFrame = 0;
+    const syncCatalogOverlayScrolling = () => {
+      if (!(searchDialog instanceof HTMLElement)) return;
+      window.cancelAnimationFrame(catalogOverlayScrollFrame);
+      catalogOverlayScrollFrame = window.requestAnimationFrame(() => {
+        const canScroll = window.matchMedia("(max-width: 620px)").matches
+          && document.body.classList.contains("catalog-search-active")
+          && searchDialog.scrollHeight > searchDialog.clientHeight + 1;
+        searchDialog.classList.toggle("is-scrollable", canScroll);
+        if (!canScroll) searchDialog.scrollTop = 0;
+      });
+    };
+    window.addEventListener("resize", syncCatalogOverlayScrolling, { passive: true });
+    window.visualViewport?.addEventListener("resize", syncCatalogOverlayScrolling, { passive: true });
+
+    const mobileCategoryLoop = window.matchMedia("(max-width: 620px)");
+    const categoryLoopRows = Array.from(catalog.querySelectorAll(".catalog-inline-categories"));
+    let categoryLoopDisposers = [];
+    const createCategoryLoop = (row) => {
+      if (!(row instanceof HTMLElement)) return null;
+      const originals = Array.from(row.children).filter((item) => item instanceof HTMLButtonElement && !item.hasAttribute("data-category-loop-clone"));
+      if (originals.length < 2) return null;
+
+      const controller = new AbortController();
+      const beforeClones = originals.map((original, index) => {
+        const clone = original.cloneNode(true);
+        clone.dataset.categoryLoopClone = "before";
+        clone.dataset.categoryLoopIndex = String(index);
+        clone.setAttribute("aria-hidden", "true");
+        clone.tabIndex = -1;
+        return clone;
+      });
+      const afterClones = originals.map((original, index) => {
+        const clone = original.cloneNode(true);
+        clone.dataset.categoryLoopClone = "after";
+        clone.dataset.categoryLoopIndex = String(index);
+        clone.setAttribute("aria-hidden", "true");
+        clone.tabIndex = -1;
+        return clone;
+      });
+      const beforeFragment = document.createDocumentFragment();
+      beforeClones.forEach((clone) => beforeFragment.append(clone));
+      row.insertBefore(beforeFragment, originals[0]);
+      row.append(...afterClones);
+      row.classList.add("is-looping");
+
+      const cloneGroups = [beforeClones, afterClones];
+      const syncClones = () => {
+        originals.forEach((original, index) => {
+          cloneGroups.forEach((group) => {
+            const clone = group[index];
+            clone.className = original.className;
+            clone.setAttribute("aria-pressed", original.getAttribute("aria-pressed") || "false");
+          });
+        });
+      };
+      const originalObserver = new MutationObserver(syncClones);
+      originals.forEach((original) => originalObserver.observe(original, { attributes: true, attributeFilter: ["class", "aria-pressed"] }));
+
+      let cycleWidth = 0;
+      let pauseUntil = performance.now() + 1400;
+      let interacting = false;
+      let visible = true;
+      let animationFrame = 0;
+      let scrollFrame = 0;
+      let lastFrameTime = 0;
+      const normalizeScroll = () => {
+        if (cycleWidth <= 0) return;
+        if (row.scrollLeft < cycleWidth * 0.5) row.scrollLeft += cycleWidth;
+        else if (row.scrollLeft >= cycleWidth * 1.5) row.scrollLeft -= cycleWidth;
+      };
+      const measureLoop = () => {
+        const nextCycleWidth = afterClones[0].offsetLeft - originals[0].offsetLeft;
+        if (nextCycleWidth <= 0) return;
+        const previousCycleWidth = cycleWidth;
+        const cycleOffset = previousCycleWidth > 0
+          ? ((row.scrollLeft - previousCycleWidth) % previousCycleWidth + previousCycleWidth) % previousCycleWidth
+          : 0;
+        cycleWidth = nextCycleWidth;
+        row.scrollLeft = cycleWidth + cycleOffset;
+      };
+      const pauseAutoscroll = (duration = 4200) => {
+        pauseUntil = performance.now() + duration;
+      };
+      const handleCloneClick = (event) => {
+        const clone = event.currentTarget;
+        const source = originals[Number(clone.dataset.categoryLoopIndex)];
+        if (!(source instanceof HTMLButtonElement)) return;
+        event.preventDefault();
+        pauseAutoscroll();
+        source.click();
+      };
+      [...beforeClones, ...afterClones].forEach((clone) => clone.addEventListener("click", handleCloneClick, { signal: controller.signal }));
+
+      row.addEventListener("pointerdown", () => {
+        interacting = true;
+        pauseAutoscroll();
+      }, { passive: true, signal: controller.signal });
+      ["pointerup", "pointercancel", "pointerleave"].forEach((eventName) => row.addEventListener(eventName, () => {
+        interacting = false;
+        pauseAutoscroll();
+      }, { passive: true, signal: controller.signal }));
+      row.addEventListener("wheel", () => pauseAutoscroll(), { passive: true, signal: controller.signal });
+      row.addEventListener("focusin", () => {
+        interacting = true;
+        pauseAutoscroll();
+      }, { signal: controller.signal });
+      row.addEventListener("focusout", (event) => {
+        if (event.relatedTarget instanceof Node && row.contains(event.relatedTarget)) return;
+        interacting = false;
+        pauseAutoscroll();
+      }, { signal: controller.signal });
+      row.addEventListener("scroll", () => {
+        if (scrollFrame) return;
+        scrollFrame = window.requestAnimationFrame(() => {
+          scrollFrame = 0;
+          normalizeScroll();
+        });
+      }, { passive: true, signal: controller.signal });
+
+      const resizeObserver = "ResizeObserver" in window ? new ResizeObserver(measureLoop) : null;
+      resizeObserver?.observe(row);
+      const visibilityObserver = "IntersectionObserver" in window
+        ? new IntersectionObserver((entries) => {
+          visible = entries.some((entry) => entry.isIntersecting);
+        }, { threshold: 0.01 })
+        : null;
+      visibilityObserver?.observe(row);
+
+      const animate = (time) => {
+        const delta = lastFrameTime ? Math.min(34, time - lastFrameTime) : 0;
+        lastFrameTime = time;
+        if (visible && !document.hidden && !interacting && !reducedMotion.matches && time >= pauseUntil && cycleWidth > 0) {
+          // scrollLeft accepts fractional values. Moving every frame avoids the
+          // visible one-pixel cadence that made the slow loop look jerky.
+          row.scrollLeft += delta * 0.014;
+          normalizeScroll();
+        }
+        animationFrame = window.requestAnimationFrame(animate);
+      };
+      syncClones();
+      window.requestAnimationFrame(measureLoop);
+      animationFrame = window.requestAnimationFrame(animate);
+
+      return () => {
+        controller.abort();
+        originalObserver.disconnect();
+        resizeObserver?.disconnect();
+        visibilityObserver?.disconnect();
+        window.cancelAnimationFrame(animationFrame);
+        window.cancelAnimationFrame(scrollFrame);
+        [...beforeClones, ...afterClones].forEach((clone) => clone.remove());
+        row.classList.remove("is-looping");
+        row.scrollLeft = 0;
+      };
+    };
+    const syncMobileCategoryLoops = () => {
+      categoryLoopDisposers.forEach((dispose) => dispose());
+      categoryLoopDisposers = [];
+      if (!mobileCategoryLoop.matches) return;
+      categoryLoopRows.forEach((row) => {
+        const dispose = createCategoryLoop(row);
+        if (dispose) categoryLoopDisposers.push(dispose);
+      });
+    };
+    mobileCategoryLoop.addEventListener("change", syncMobileCategoryLoops);
+
+    const catalogSortStatus = document.createElement("span");
+    catalogSortStatus.className = "product-title-copy-status catalog-sort-status";
+    catalogSortStatus.setAttribute("role", "status");
+    catalogSortStatus.setAttribute("aria-live", "polite");
+    catalogSortStatus.setAttribute("aria-atomic", "true");
+    let catalogSortStatusTimer = 0;
+
+    const hideCatalogSortStatus = () => {
+      window.clearTimeout(catalogSortStatusTimer);
+      catalogSortStatus.classList.remove("is-visible");
+    };
+
+    const showCatalogSortStatus = (sortState, sourceButton) => {
+      if (!(sourceButton instanceof HTMLElement)) return;
+      const statusLabels = {
+        asc: "Цена: по возрастанию",
+        desc: "Цена: по убыванию",
+        "": "Сортировка по цене выключена",
+        newest: "Сначала новые модели",
+        popular: "Сначала популярные модели",
+        alpha: "Модели по алфавиту",
+        defaultOrder: "Порядок по умолчанию",
+      };
+
+      window.clearTimeout(catalogSortStatusTimer);
+      catalogSortStatus.textContent = statusLabels[sortState] || statusLabels[""];
+      catalogSortStatus.style.removeProperty("--catalog-status-shift-x");
+      catalogSortStatus.classList.remove("is-visible");
+      sourceButton.append(catalogSortStatus);
+      window.requestAnimationFrame(() => {
+        const statusRect = catalogSortStatus.getBoundingClientRect();
+        let shiftX = 0;
+        if (statusRect.left < 8) shiftX = 8 - statusRect.left;
+        else if (statusRect.right > window.innerWidth - 8) shiftX = window.innerWidth - 8 - statusRect.right;
+        catalogSortStatus.style.setProperty("--catalog-status-shift-x", `${shiftX}px`);
+        catalogSortStatus.classList.add("is-visible");
+      });
+      catalogSortStatusTimer = window.setTimeout(hideCatalogSortStatus, 1200);
+    };
+
+    document.addEventListener("pointerdown", hideCatalogSortStatus, { passive: true });
+    document.addEventListener("keydown", hideCatalogSortStatus);
+
     const cards = Array.from(grid.querySelectorAll(".product-card"));
     const catalogPrices = cards.map((card) => Number(card.dataset.price)).filter(Number.isFinite);
     const priceStep = 10;
@@ -2217,7 +2728,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const priceCeiling = Math.max(priceFloor + priceStep, detectedPriceCeiling);
     const requestedPriceParams = new URLSearchParams(window.location.search);
     const catalogFiltersKey = "bastion-catalog-filters";
-    const catalogFilterParams = ["product_cat", "catalog_search", "price_sort", "catalog_price_min", "catalog_price_max", "catalog_filters"];
+    const catalogFilterParams = ["product_cat", "catalog_search", "price_sort", "catalog_order", "catalog_price_min", "catalog_price_max", "catalog_filters"];
     try {
       window.localStorage.removeItem(catalogFiltersKey);
     } catch {
@@ -2301,7 +2812,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const desktopCatalogGrid = window.matchMedia("(min-width: 901px)");
     const syncCatalogImageSizes = (singleColumn) => {
       const sizes = singleColumn
-        ? "(max-width: 520px) 100vw, (max-width: 900px) 50vw, 50vw"
+        ? "(max-width: 520px) 100vw, (max-width: 900px) 50vw, 33vw"
         : "(max-width: 520px) 50vw, (max-width: 900px) 33vw, 25vw";
       grid.querySelectorAll(".product-image img").forEach((image) => {
         if (!(image instanceof HTMLImageElement)) return;
@@ -2317,7 +2828,7 @@ document.addEventListener("DOMContentLoaded", () => {
       grid.classList.toggle("is-single-column", singleColumn);
       syncCatalogImageSizes(singleColumn);
       const expandedGridLabel = desktopCatalogGrid.matches
-        ? (singleColumn ? "Показать товары по четыре карточки" : "Показать товары по две карточки")
+        ? (singleColumn ? "Показать товары по четыре карточки" : "Показать товары по три карточки")
         : (singleColumn ? "Показать товары по две карточки" : "Показать товары по одной карточке");
       if (gridToggle instanceof HTMLButtonElement) {
         gridToggle.setAttribute("aria-pressed", String(singleColumn));
@@ -2353,24 +2864,48 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!(image instanceof HTMLImageElement) || !image.dataset.src) return Promise.resolve();
       const pendingLoad = catalogImageLoads.get(image);
       if (pendingLoad) return pendingLoad;
+      image.classList.remove("is-deferred-image-error");
+      image.classList.add("is-deferred-image-loading");
       const loaded = new Promise((resolve) => {
         const frame = image.closest(".product-image");
-        image.addEventListener("load", () => {
-          frame?.classList.remove("has-image-error");
-          frame?.classList.add("is-image-loaded");
-          frame?.setAttribute("aria-busy", "false");
+        let settled = false;
+        const revealLoadedImage = async () => {
+          if (settled) return;
+          settled = true;
+          try {
+            if (typeof image.decode === "function") await image.decode();
+          } catch {
+            // A completed image can still be painted when decode() is unavailable
+            // or rejects because the browser released an intermediate frame.
+          }
+          await new Promise((paintReady) => window.requestAnimationFrame(paintReady));
+          image.classList.remove("is-deferred-image-loading");
+          image.classList.add("is-deferred-image-loaded");
+          if (!image.classList.contains("product-image-alt")) {
+            frame?.classList.remove("has-image-error");
+            frame?.classList.add("is-image-loaded");
+            frame?.setAttribute("aria-busy", "false");
+          }
           resolve();
-        }, { once: true });
-        image.addEventListener("error", () => {
-          frame?.classList.add("has-image-error");
-          frame?.setAttribute("aria-busy", "false");
+        };
+        const markImageError = () => {
+          if (settled) return;
+          settled = true;
+          image.classList.remove("is-deferred-image-loading");
+          image.classList.add("is-deferred-image-error");
+          if (!image.classList.contains("product-image-alt")) {
+            frame?.classList.add("has-image-error");
+            frame?.setAttribute("aria-busy", "false");
+          }
           resolve();
-        }, { once: true });
+        };
+        image.addEventListener("load", revealLoadedImage, { once: true });
+        image.addEventListener("error", markImageError, { once: true });
       });
       catalogImageLoads.set(image, loaded);
       image.decoding = "async";
       image.loading = "eager";
-      image.fetchPriority = "low";
+      image.fetchPriority = slowCatalogConnection ? "low" : "auto";
       if (image.dataset.srcset) {
         image.srcset = adaptImageSrcset(image.dataset.srcset);
         delete image.dataset.srcset;
@@ -2382,17 +2917,26 @@ document.addEventListener("DOMContentLoaded", () => {
     const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
     const slowCatalogConnection = Boolean(connection && (connection.saveData || /(^|-)2g$|3g/.test(connection.effectiveType || "")));
     document.body.classList.toggle("is-slow-catalog-connection", slowCatalogConnection);
-    const catalogImageConcurrency = slowCatalogConnection || window.matchMedia("(max-width: 620px)").matches ? 1 : 3;
+    const reportedDeviceMemory = Number(navigator.deviceMemory) || 0;
+    const reportedProcessorCount = Number(navigator.hardwareConcurrency) || 0;
+    const constrainedCatalogDevice = slowCatalogConnection
+      || (reportedDeviceMemory > 0 && reportedDeviceMemory <= 4)
+      || (reportedProcessorCount > 0 && reportedProcessorCount <= 4);
+    const mobileCatalogViewport = window.matchMedia("(max-width: 620px)").matches;
+    const catalogImageConcurrency = slowCatalogConnection
+      ? 1
+      : (constrainedCatalogDevice ? 2 : (mobileCatalogViewport ? 3 : 5));
     const catalogImageQueue = [];
-    const queuedCatalogImages = new WeakSet();
+    const queuedCatalogImages = new WeakMap();
     let activeCatalogImageLoads = 0;
     const drainCatalogImageQueue = () => {
       while (activeCatalogImageLoads < catalogImageConcurrency && catalogImageQueue.length) {
-        const image = catalogImageQueue.shift();
+        const queueEntry = catalogImageQueue.shift();
+        const { image, allowHidden } = queueEntry;
         queuedCatalogImages.delete(image);
         if (!(image instanceof HTMLImageElement) || !image.dataset.src) continue;
         const card = image.closest(".product-card");
-        if (!(card instanceof HTMLElement) || card.hidden) continue;
+        if (!(card instanceof HTMLElement) || (card.hidden && !allowHidden)) continue;
         activeCatalogImageLoads += 1;
         card.classList.add("is-catalog-image-loading");
         hydrateDeferredImage(image).finally(() => {
@@ -2403,29 +2947,22 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       }
     };
-    const enqueueCatalogCard = (card) => {
+    const enqueueCatalogCard = (card, allowHidden = false) => {
       if (!(card instanceof HTMLElement)) return;
       card.querySelectorAll("img[data-src]:not(.product-image-alt)").forEach((image) => {
-        if (!(image instanceof HTMLImageElement) || queuedCatalogImages.has(image)) return;
-        queuedCatalogImages.add(image);
-        catalogImageQueue.push(image);
+        if (!(image instanceof HTMLImageElement)) return;
+        const queuedEntry = queuedCatalogImages.get(image);
+        if (queuedEntry) {
+          if (allowHidden) queuedEntry.allowHidden = true;
+          return;
+        }
+        const queueEntry = { image, allowHidden };
+        queuedCatalogImages.set(image, queueEntry);
+        catalogImageQueue.push(queueEntry);
       });
       drainCatalogImageQueue();
     };
-    const catalogImageObserver = "IntersectionObserver" in window
-      ? new IntersectionObserver((entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          enqueueCatalogCard(entry.target);
-          catalogImageObserver.unobserve(entry.target);
-        });
-      }, { rootMargin: slowCatalogConnection ? "80px 0px" : "220px 0px", threshold: 0.01 })
-      : null;
-    const queueCatalogCardImages = (card) => {
-      if (!card.querySelector("img[data-src]:not(.product-image-alt)")) return;
-      if (catalogImageObserver) catalogImageObserver.observe(card);
-      else enqueueCatalogCard(card);
-    };
+    const prewarmCatalogCardImages = (card) => enqueueCatalogCard(card, true);
     if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) {
       cards.forEach((card) => {
         const hydrateAlternate = () => card.querySelectorAll("img.product-image-alt[data-src]").forEach(hydrateDeferredImage);
@@ -2438,7 +2975,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (window.matchMedia("(max-width: 900px)").matches) return 3;
       return 4;
     };
-    const getBatchSize = () => getCatalogColumnCount() * (window.matchMedia("(max-width: 520px)").matches ? 4 : 3);
+    const getBatchSize = () => {
+      const columns = getCatalogColumnCount();
+      // Give phones six complete rows up front so the catalogue does not feel
+      // artificially interrupted after only eight products.
+      return columns * (window.matchMedia("(max-width: 520px)").matches ? 6 : 3);
+    };
     let catalogReturnState = null;
     try {
       const savedState = JSON.parse(window.sessionStorage.getItem(catalogReturnKey) || "null");
@@ -2447,10 +2989,24 @@ document.addEventListener("DOMContentLoaded", () => {
       catalogReturnState = null;
     }
     let visibleLimit = Math.max(getBatchSize(), Number(catalogReturnState?.visibleLimit) || 0);
+    let currentMatchingCards = [];
+    let catalogPrewarmRevision = 0;
+    const scheduleCatalogPrewarm = (nextCards) => {
+      const revision = ++catalogPrewarmRevision;
+      window.setTimeout(() => {
+        if (revision !== catalogPrewarmRevision) return;
+        nextCards.forEach((card) => {
+          if (card.hidden) prewarmCatalogCardImages(card);
+        });
+      }, slowCatalogConnection ? 220 : 40);
+    };
     const initialCategory = categoryButtons.find((button) => button.getAttribute("aria-pressed") === "true")?.dataset.catalogCategory || "";
-    let activeCategory = "";
+    // Category cards on the home page arrive with a server-selected button.
+    // Use that state for the first render even though the URL is cleaned below.
+    let activeCategory = initialCategory;
     const requestedSort = "";
     let activeSort = ["asc", "desc"].includes(requestedSort) ? requestedSort : "";
+    let activeOrder = "";
     let appliedSearchValue = "";
     let catalogSearchDraft = null;
     if (searchInput instanceof HTMLInputElement) searchInput.value = appliedSearchValue;
@@ -2465,6 +3021,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     const activeAdvancedOptions = () => advancedOptions.filter((button) => button.getAttribute("aria-pressed") === "true");
+    let syncCatalogSearchActions = () => {};
     const matchesAdvancedFilters = (card, searchText) => {
       const cardColors = (card.dataset.colors || "").split(" ").filter(Boolean);
       const groupedOptions = new Map();
@@ -2486,6 +3043,7 @@ document.addEventListener("DOMContentLoaded", () => {
         || activeCategory !== ""
         || appliedSearchValue !== ""
         || activeSort !== ""
+        || activeOrder !== ""
         || activeMinPrice !== priceFloor
         || activeMaxPrice !== priceCeiling;
       if (advancedCount) {
@@ -2495,6 +3053,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (advancedReset) advancedReset.hidden = !hasAppliedFilters;
       if (inlineReset) inlineReset.hidden = !hasAppliedFilters;
       if (quickReset) quickReset.hidden = !hasAppliedFilters;
+      if (mobileHeaderReset) mobileHeaderReset.hidden = !hasAppliedFilters;
       advancedToggle?.classList.toggle("has-filters", activeCount > 0);
       quickAdvancedToggle?.classList.toggle("has-filters", activeCount > 0);
       inlineAdvancedToggle?.classList.toggle("has-filters", activeCount > 0);
@@ -2512,6 +3071,7 @@ document.addEventListener("DOMContentLoaded", () => {
         button.classList.toggle("is-active", isActive);
         button.setAttribute("aria-pressed", String(isActive));
       });
+      syncCatalogSearchActions();
     };
     const syncOverlayAdvancedControls = () => {
       const activeCount = activeAdvancedOptions().length;
@@ -2527,12 +3087,28 @@ document.addEventListener("DOMContentLoaded", () => {
         advancedCount.hidden = activeCount === 0;
       }
       if (advancedReset) advancedReset.hidden = !hasDraftFilters;
+      if (mobileHeaderReset) mobileHeaderReset.hidden = !hasDraftFilters;
       advancedToggle?.classList.toggle("has-filters", activeCount > 0);
+      syncCatalogSearchActions();
     };
     const sortLabels = {
       "": "Сортировка по цене выключена. Показать сначала дешёвые",
       asc: "Сначала дешёвые. Переключить на дорогие",
       desc: "Сначала дорогие. Сбросить сортировку",
+    };
+    const orderLabels = {
+      "": "Порядок: по умолчанию. Показать новинки",
+      newest: "Порядок: новинки. Показать популярные",
+      popular: "Порядок: популярные. Показать по алфавиту",
+      alpha: "Порядок: по алфавиту. Вернуть порядок по умолчанию",
+    };
+    const syncInlineOrder = () => {
+      if (!(inlineOrderButton instanceof HTMLButtonElement)) return;
+      inlineOrderButton.dataset.orderState = activeOrder;
+      inlineOrderButton.classList.toggle("is-active", activeOrder !== "");
+      inlineOrderButton.setAttribute("aria-pressed", String(activeOrder !== ""));
+      inlineOrderButton.setAttribute("aria-label", orderLabels[activeOrder]);
+      inlineOrderButton.title = orderLabels[activeOrder].split(".")[0];
     };
     const syncOverlayCategory = (category) => {
       categoryButtons.forEach((button) => {
@@ -2679,10 +3255,11 @@ document.addEventListener("DOMContentLoaded", () => {
           const headerOffset = hasAdminBar
             ? (mobileCatalog ? 104 : 86)
             : (mobileCatalog ? 58 : 54);
-          const firstVisibleCard = Array.from(grid.children).find((card) => card instanceof HTMLElement && !card.hidden);
-          const target = firstVisibleCard instanceof HTMLElement ? firstVisibleCard : grid;
+          const target = inlineTools instanceof HTMLElement ? inlineTools : catalog;
           const targetTop = Math.max(0, getElementDocumentTop(target) - headerOffset);
-          if (Math.abs(window.scrollY - targetTop) <= 6) return;
+          // Filtering must never pull a visible toolbar down to the product cards.
+          // Only bring the search row back when the user is already below it.
+          if (window.scrollY <= targetTop + 6) return;
           window.scrollTo({
             left: 0,
             top: targetTop,
@@ -2696,11 +3273,24 @@ document.addEventListener("DOMContentLoaded", () => {
       activeCategory = category;
       if (resetLimit) visibleLimit = getBatchSize();
       const search = normalizeSearch(searchInput?.value || "");
+      const compareCatalogOrder = (first, second) => {
+        if (activeOrder === "newest") {
+          const difference = Number(second.dataset.created || 0) - Number(first.dataset.created || 0);
+          if (difference !== 0) return difference;
+        } else if (activeOrder === "popular") {
+          const difference = Number(second.dataset.popularity || 0) - Number(first.dataset.popularity || 0);
+          if (difference !== 0) return difference;
+        } else if (activeOrder === "alpha") {
+          const difference = String(first.dataset.orderTitle || "").localeCompare(String(second.dataset.orderTitle || ""), "ru", { sensitivity: "base", numeric: true });
+          if (difference !== 0) return difference;
+        }
+        return Number(first.dataset.catalogOrder) - Number(second.dataset.catalogOrder);
+      };
       const sortedCards = [...cards].sort((first, second) => {
-        if (!activeSort) return Number(first.dataset.catalogOrder) - Number(second.dataset.catalogOrder);
+        if (!activeSort) return compareCatalogOrder(first, second);
         const priceDifference = Number(first.dataset.price) - Number(second.dataset.price);
         if (priceDifference !== 0) return activeSort === "asc" ? priceDifference : -priceDifference;
-        return Number(first.dataset.catalogOrder) - Number(second.dataset.catalogOrder);
+        return compareCatalogOrder(first, second);
       });
       sortedCards.forEach((card) => grid.append(card));
       const matchingCards = sortedCards.filter((card) => {
@@ -2710,12 +3300,17 @@ document.addEventListener("DOMContentLoaded", () => {
         const matchesPrice = !Number.isFinite(price) || (price >= activeMinPrice && price <= activeMaxPrice);
         return (!category || categories.includes(category)) && (!search || searchText.includes(search)) && matchesAdvancedFilters(card, searchText) && matchesPrice;
       });
+      currentMatchingCards = matchingCards;
       cards.forEach((card) => { card.hidden = true; });
       matchingCards.slice(0, visibleLimit).forEach((card) => {
         card.hidden = false;
-        queueCatalogCardImages(card);
+        // The current batch always has priority over the hidden prewarmed batch.
+        enqueueCatalogCard(card);
       });
       const shownCount = Math.min(visibleLimit, matchingCards.length);
+      // Prepare exactly one upcoming batch while it is still outside the layout.
+      // This keeps scrolling seamless without downloading the entire catalogue.
+      scheduleCatalogPrewarm(matchingCards.slice(shownCount, shownCount + getBatchSize()));
 
       categoryButtons.forEach((button) => {
         const isActive = button.dataset.catalogCategory === activeCategory;
@@ -2753,6 +3348,7 @@ document.addEventListener("DOMContentLoaded", () => {
         inlineSortButton.setAttribute("aria-label", sortLabels[activeSort]);
         inlineSortButton.title = sortLabels[activeSort];
       }
+      syncInlineOrder();
       if (inlineSearchInput instanceof HTMLInputElement && document.activeElement !== inlineSearchInput) {
         inlineSearchInput.value = searchInput instanceof HTMLInputElement ? searchInput.value : "";
       }
@@ -2772,6 +3368,7 @@ document.addEventListener("DOMContentLoaded", () => {
         category ? params.set("product_cat", category) : params.delete("product_cat");
         search ? params.set("catalog_search", searchInput.value.trim()) : params.delete("catalog_search");
         activeSort ? params.set("price_sort", activeSort) : params.delete("price_sort");
+        activeOrder ? params.set("catalog_order", activeOrder) : params.delete("catalog_order");
         activeMinPrice > priceFloor ? params.set("catalog_price_min", String(activeMinPrice)) : params.delete("catalog_price_min");
         activeMaxPrice < priceCeiling ? params.set("catalog_price_max", String(activeMaxPrice)) : params.delete("catalog_price_max");
         const selectedAdvanced = activeAdvancedOptions().map((button) => button.dataset.filterValue).filter(Boolean);
@@ -2798,16 +3395,26 @@ document.addEventListener("DOMContentLoaded", () => {
     }));
     quickCategoryButtons.forEach((button) => button.addEventListener("click", () => applyCatalogCategory(button.dataset.catalogQuickCategory || "", true, true, true)));
     inlineCategoryButtons.forEach((button) => button.addEventListener("click", () => applyCatalogCategory(button.dataset.catalogInlineCategory || "", true, true, true)));
-    sortButton?.addEventListener("click", () => {
+    const cycleCatalogOrder = (sourceButton) => {
+      const orderStates = ["", "newest", "popular", "alpha"];
+      const currentIndex = orderStates.indexOf(activeOrder);
+      activeOrder = orderStates[(currentIndex + 1) % orderStates.length];
+      applyCatalogCategory(activeCategory, true, true, true);
+      showCatalogSortStatus(activeOrder || "defaultOrder", sourceButton);
+    };
+    const cycleCatalogSort = (sourceButton, activationEvent) => {
       if (catalogSearchDraft) {
         catalogSearchDraft.sort = catalogSearchDraft.sort === "" ? "asc" : (catalogSearchDraft.sort === "asc" ? "desc" : "");
         syncOverlaySort(catalogSearchDraft.sort);
         syncOverlayAdvancedControls();
+        showCatalogSortStatus(catalogSearchDraft.sort, sourceButton, activationEvent);
         return;
       }
       activeSort = activeSort === "" ? "asc" : (activeSort === "asc" ? "desc" : "");
       applyCatalogCategory(activeCategory, true, true, true);
-    });
+      showCatalogSortStatus(activeSort, sourceButton, activationEvent);
+    };
+    sortButton?.addEventListener("click", (event) => cycleCatalogSort(sortButton, event));
     const applyPriceRange = (minimum, maximum, changedControl, syncUrl, focusFilters = false) => {
       activeMinPrice = clampPrice(minimum, activeMinPrice);
       activeMaxPrice = clampPrice(maximum, activeMaxPrice);
@@ -2853,8 +3460,9 @@ document.addEventListener("DOMContentLoaded", () => {
     quickPriceMaxInput?.addEventListener("keydown", (event) => applyTypedPriceOnEnter(event, quickPriceMinInput, quickPriceMaxInput, "max"));
     inlinePriceMinInput?.addEventListener("keydown", (event) => applyTypedPriceOnEnter(event, inlinePriceMinInput, inlinePriceMaxInput, "min"));
     inlinePriceMaxInput?.addEventListener("keydown", (event) => applyTypedPriceOnEnter(event, inlinePriceMinInput, inlinePriceMaxInput, "max"));
-    quickSortButton?.addEventListener("click", () => sortButton?.click());
-    inlineSortButton?.addEventListener("click", () => sortButton?.click());
+    quickSortButton?.addEventListener("click", (event) => cycleCatalogSort(quickSortButton, event));
+    inlineOrderButton?.addEventListener("click", () => cycleCatalogOrder(inlineOrderButton));
+    inlineSortButton?.addEventListener("click", (event) => cycleCatalogSort(inlineSortButton, event));
     quickGridToggle?.addEventListener("click", () => gridToggle?.click());
     inlineGridToggle?.addEventListener("click", () => gridToggle?.click());
     quickAdvancedToggle?.addEventListener("click", () => {
@@ -2975,6 +3583,8 @@ document.addEventListener("DOMContentLoaded", () => {
     const closeCatalogSearch = (resetFilters = false) => {
       catalogSearchDraft = null;
       document.body.classList.remove("catalog-search-active");
+      document.documentElement.classList.remove("catalog-search-active");
+      searchDialog?.classList.remove("is-scrollable");
       searchOverlay?.setAttribute("aria-hidden", "true");
       if (searchOverlay instanceof HTMLElement) searchOverlay.inert = true;
       searchInput?.blur();
@@ -2994,8 +3604,10 @@ document.addEventListener("DOMContentLoaded", () => {
         resetAdvancedPanelStyles();
       }
       document.body.classList.add("catalog-search-active");
+      document.documentElement.classList.add("catalog-search-active");
       searchOverlay?.setAttribute("aria-hidden", "false");
       if (searchOverlay instanceof HTMLElement) searchOverlay.inert = false;
+      window.requestAnimationFrame(() => window.requestAnimationFrame(syncCatalogOverlayScrolling));
       startPriceRangeHint(priceRange);
       window.setTimeout(() => searchInput?.focus({ preventScroll: true }), reducedMotion.matches ? 0 : 360);
     };
@@ -3022,13 +3634,36 @@ document.addEventListener("DOMContentLoaded", () => {
       applyCatalogCategory(activeCategory);
       scrollToCatalogSearchResults();
     };
-    const syncCatalogSearchActions = () => {
+    syncCatalogSearchActions = () => {
       const mobileCatalog = window.matchMedia("(max-width: 620px)").matches;
+      const appliedFiltersActive = activeCategory !== ""
+        || normalizeSearch(appliedSearchValue) !== ""
+        || activeSort !== ""
+        || activeOrder !== ""
+        || activeMinPrice !== priceFloor
+        || activeMaxPrice !== priceCeiling
+        || activeAdvancedOptions().length > 0;
+      const draftFiltersActive = Boolean(catalogSearchDraft && (
+        catalogSearchDraft.category !== ""
+        || (searchInput instanceof HTMLInputElement && normalizeSearch(searchInput.value) !== "")
+        || catalogSearchDraft.sort !== ""
+        || catalogSearchDraft.minPrice !== priceFloor
+        || catalogSearchDraft.maxPrice !== priceCeiling
+        || activeAdvancedOptions().length > 0
+      ));
       if (searchClear instanceof HTMLButtonElement && searchInput instanceof HTMLInputElement) {
-        searchClear.disabled = !mobileCatalog && searchInput.value.length === 0;
+        searchClear.disabled = mobileCatalog
+          ? !(catalogSearchDraft ? draftFiltersActive : appliedFiltersActive)
+          : normalizeSearch(searchInput.value) === "";
+        searchClear.setAttribute("aria-label", mobileCatalog ? "Сбросить поиск и фильтры" : "Очистить поиск");
+        searchClear.title = mobileCatalog ? "Сбросить всё" : "Очистить поиск";
       }
       if (inlineSearchClear instanceof HTMLButtonElement && inlineSearchInput instanceof HTMLInputElement) {
-        inlineSearchClear.disabled = !mobileCatalog && inlineSearchInput.value.length === 0;
+        inlineSearchClear.disabled = mobileCatalog
+          ? !appliedFiltersActive
+          : normalizeSearch(inlineSearchInput.value) === "";
+        inlineSearchClear.setAttribute("aria-label", mobileCatalog ? "Сбросить поиск и фильтры" : "Очистить поиск");
+        inlineSearchClear.title = mobileCatalog ? "Сбросить всё" : "Очистить поиск";
       }
     };
     const applyClearedCatalogSearch = (input) => {
@@ -3100,6 +3735,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (inlineSearchInput) inlineSearchInput.value = "";
       appliedSearchValue = "";
       activeSort = "";
+      activeOrder = "";
       activeMinPrice = priceFloor;
       activeMaxPrice = priceCeiling;
       syncPriceControls();
@@ -3114,15 +3750,61 @@ document.addEventListener("DOMContentLoaded", () => {
     inlineReset?.addEventListener("click", () => resetCatalogFilters());
     quickReset?.addEventListener("click", () => resetCatalogFilters());
     showAllButton?.addEventListener("click", () => resetCatalogFilters());
+    syncMobileCategoryLoops();
     syncCatalogSearchActions();
-    loadMoreButton?.addEventListener("click", () => {
-      const scrollLeft = window.scrollX;
-      const scrollTop = window.scrollY;
+    const loadNextCatalogBatch = (preserveScroll = true) => {
+      if (!(loadMoreButton instanceof HTMLButtonElement) || loadMoreWrap?.hidden) return false;
+      const batchStart = Math.min(visibleLimit, currentMatchingCards.length);
+      const nextVisibleLimit = Math.min(batchStart + getBatchSize(), currentMatchingCards.length);
+      if (nextVisibleLimit <= batchStart) return false;
       loadMoreButton.blur();
-      visibleLimit += getBatchSize();
-      applyCatalogCategory(activeCategory, false, false);
-      requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo({ left: scrollLeft, top: scrollTop, behavior: "instant" })));
+      visibleLimit = nextVisibleLimit;
+      currentMatchingCards.slice(batchStart, nextVisibleLimit).forEach((card) => {
+        card.hidden = false;
+        enqueueCatalogCard(card);
+      });
+      if (countShown) countShown.textContent = String(nextVisibleLimit);
+      if (countTotal) countTotal.textContent = String(currentMatchingCards.length);
+      if (loadMoreStatus) loadMoreStatus.textContent = `${nextVisibleLimit} из ${currentMatchingCards.length}`;
+      if (loadMoreWrap) loadMoreWrap.hidden = nextVisibleLimit >= currentMatchingCards.length;
+      scheduleCatalogPrewarm(currentMatchingCards.slice(nextVisibleLimit, nextVisibleLimit + getBatchSize()));
+      return true;
+    };
+    loadMoreButton?.addEventListener("click", () => {
+      loadNextCatalogBatch();
     });
+
+    // Keep the catalogue continuous: the button doubles as a count indicator
+    // and a manual fallback, while approaching it loads the next batch.
+    if (loadMoreButton instanceof HTMLButtonElement && loadMoreWrap instanceof HTMLElement && "IntersectionObserver" in window) {
+      let automaticLoadTimer = 0;
+      let automaticLoadPending = false;
+      const automaticLoadDistance = () => Math.round(Math.max(
+        slowCatalogConnection ? 640 : (constrainedCatalogDevice ? 960 : 1280),
+        window.innerHeight * (slowCatalogConnection ? 0.85 : (constrainedCatalogDevice ? 1.15 : 1.5)),
+      ));
+      const loadMoreIsNearViewport = () => {
+        if (loadMoreWrap.hidden) return false;
+        const bounds = loadMoreWrap.getBoundingClientRect();
+        return bounds.top <= window.innerHeight + automaticLoadDistance() && bounds.bottom >= -automaticLoadDistance();
+      };
+      const scheduleAutomaticLoad = () => {
+        if (automaticLoadPending || !loadMoreIsNearViewport()) return;
+        automaticLoadPending = true;
+        window.clearTimeout(automaticLoadTimer);
+        automaticLoadTimer = window.setTimeout(() => {
+          automaticLoadPending = false;
+          if (!loadMoreIsNearViewport() || !loadNextCatalogBatch(false)) return;
+          window.requestAnimationFrame(() => window.requestAnimationFrame(scheduleAutomaticLoad));
+        }, reducedMotion.matches ? 0 : (slowCatalogConnection ? 140 : 50));
+      };
+      const loadMoreObserver = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) scheduleAutomaticLoad();
+      }, { rootMargin: `0px 0px ${automaticLoadDistance()}px 0px`, threshold: 0 });
+      loadMoreObserver.observe(loadMoreWrap);
+      window.addEventListener("resize", scheduleAutomaticLoad, { passive: true });
+      window.requestAnimationFrame(scheduleAutomaticLoad);
+    }
     syncAdvancedControls();
     applyCatalogCategory(activeCategory, false, !catalogReturnState);
     if (catalogReturnState) {
@@ -3464,9 +4146,10 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     button.addEventListener("click", async () => {
+      const productTitle = button.dataset.shareTitle || document.title;
       const shareData = {
-        title: button.dataset.shareTitle || document.title,
-        text: button.dataset.shareTitle ? `Посмотрите дверь «${button.dataset.shareTitle}»` : document.title,
+        title: `${productTitle} — Alexandrov.by`,
+        text: button.dataset.shareTitle ? `Посмотрите дверь «${button.dataset.shareTitle}» на Alexandrov.by` : `Посмотрите на Alexandrov.by`,
         url: shareUrl,
       };
       try {
@@ -3857,180 +4540,4 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  document.querySelectorAll("[data-door-configurator]").forEach((configurator) => {
-    const stage = configurator.querySelector("[data-constructor-stage]");
-    const backgroundImage = configurator.querySelector("[data-constructor-background]");
-    const doorLayer = configurator.querySelector("[data-constructor-door-layer]");
-    const doorImage = configurator.querySelector("[data-constructor-door]");
-    const doorGrain = configurator.querySelector("[data-constructor-door-grain]");
-    const resetButton = configurator.querySelector("[data-constructor-reset]");
-    const backgroundChoices = [...configurator.querySelectorAll("[data-constructor-background-choice]")];
-    const doorChoices = [...configurator.querySelectorAll("[data-constructor-door-choice]")];
-    const controls = [...configurator.querySelectorAll("[data-constructor-control]")];
-    const savedBackgroundStates = new Map();
-    let activeBackground = 0;
-    let state = {
-      x: 50,
-      y: 47,
-      scale: 92,
-      light: 100,
-      shadow: 35,
-      grain: 12,
-      backgroundX: 50,
-      backgroundY: 50,
-      backgroundScale: 100,
-    };
-
-    if (!stage || !backgroundImage || !doorLayer || !doorImage || !doorGrain) return;
-
-    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
-    const syncControls = () => {
-      controls.forEach((control) => {
-        const key = control.dataset.constructorControl;
-        if (!(key in state)) return;
-        control.value = state[key];
-        const output = configurator.querySelector(`[data-constructor-output="${key}"]`);
-        if (output) output.textContent = `${Math.round(state[key])}%`;
-      });
-    };
-    const render = () => {
-      stage.style.setProperty("--door-x", `${state.x}%`);
-      stage.style.setProperty("--door-y", `${state.y}%`);
-      stage.style.setProperty("--door-scale", `${state.scale / 100}`);
-      stage.style.setProperty("--door-light", `${state.light / 100}`);
-      stage.style.setProperty("--door-shadow", `${state.shadow / 100}`);
-      stage.style.setProperty("--door-grain", `${state.grain / 100}`);
-      stage.style.setProperty("--background-x", `${state.backgroundX}%`);
-      stage.style.setProperty("--background-y", `${state.backgroundY}%`);
-      stage.style.setProperty("--background-scale", `${state.backgroundScale / 100}`);
-      syncControls();
-    };
-    const defaultStateFor = (choice) => ({
-      x: Number(choice?.dataset.x || 50),
-      y: Number(choice?.dataset.y || 47),
-      scale: Number(choice?.dataset.scale || 0.92) * 100,
-      light: 100,
-      shadow: 35,
-      grain: 12,
-      backgroundX: 50,
-      backgroundY: 50,
-      backgroundScale: 100,
-    });
-    const setActiveChoice = (choices, activeChoice) => {
-      choices.forEach((choice) => {
-        const active = choice === activeChoice;
-        choice.classList.toggle("is-active", active);
-        choice.setAttribute("aria-pressed", active ? "true" : "false");
-      });
-    };
-    const setDoorSource = (src, label) => {
-      doorImage.src = src;
-      doorImage.alt = label;
-      doorGrain.style.setProperty("--door-mask", `url("${src}")`);
-    };
-
-    backgroundChoices.forEach((choice, index) => {
-      choice.addEventListener("click", () => {
-        savedBackgroundStates.set(activeBackground, { ...state });
-        activeBackground = index;
-        state = { ...(savedBackgroundStates.get(index) || defaultStateFor(choice)) };
-        backgroundImage.src = choice.dataset.src;
-        backgroundImage.alt = choice.dataset.label;
-        setActiveChoice(backgroundChoices, choice);
-        render();
-      });
-    });
-
-    doorChoices.forEach((choice) => {
-      choice.addEventListener("click", () => {
-        setDoorSource(choice.dataset.src, choice.dataset.label);
-        setActiveChoice(doorChoices, choice);
-      });
-    });
-
-    controls.forEach((control) => {
-      control.addEventListener("input", () => {
-        const key = control.dataset.constructorControl;
-        state[key] = Number(control.value);
-        render();
-      });
-    });
-
-    const moveDoorToPointer = (event) => {
-      const bounds = stage.getBoundingClientRect();
-      state.x = clamp(((event.clientX - bounds.left) / bounds.width) * 100, 8, 92);
-      state.y = clamp(((event.clientY - bounds.top) / bounds.height) * 100, 12, 90);
-      render();
-    };
-    doorLayer.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      doorLayer.classList.add("is-dragging");
-      doorLayer.setPointerCapture(event.pointerId);
-      moveDoorToPointer(event);
-    });
-    doorLayer.addEventListener("pointermove", (event) => {
-      if (!doorLayer.hasPointerCapture(event.pointerId)) return;
-      moveDoorToPointer(event);
-    });
-    const endDrag = (event) => {
-      if (doorLayer.hasPointerCapture(event.pointerId)) doorLayer.releasePointerCapture(event.pointerId);
-      doorLayer.classList.remove("is-dragging");
-    };
-    doorLayer.addEventListener("pointerup", endDrag);
-    doorLayer.addEventListener("pointercancel", endDrag);
-    doorLayer.addEventListener("keydown", (event) => {
-      const step = event.shiftKey ? 2 : 0.5;
-      if (event.key === "ArrowLeft") state.x = clamp(state.x - step, 8, 92);
-      else if (event.key === "ArrowRight") state.x = clamp(state.x + step, 8, 92);
-      else if (event.key === "ArrowUp") state.y = clamp(state.y - step, 12, 90);
-      else if (event.key === "ArrowDown") state.y = clamp(state.y + step, 12, 90);
-      else return;
-      event.preventDefault();
-      render();
-    });
-
-    let backgroundDrag = null;
-    stage.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) return;
-      const target = event.target;
-      if (target instanceof Element && target.closest(".constructor-door-layer, button")) return;
-      event.preventDefault();
-      backgroundDrag = {
-        pointerId: event.pointerId,
-        clientX: event.clientX,
-        clientY: event.clientY,
-        x: state.backgroundX,
-        y: state.backgroundY,
-      };
-      stage.classList.add("is-background-dragging");
-      stage.setPointerCapture(event.pointerId);
-    });
-    stage.addEventListener("pointermove", (event) => {
-      if (!backgroundDrag || backgroundDrag.pointerId !== event.pointerId) return;
-      const bounds = stage.getBoundingClientRect();
-      const deltaX = ((event.clientX - backgroundDrag.clientX) / bounds.width) * 100;
-      const deltaY = ((event.clientY - backgroundDrag.clientY) / bounds.height) * 100;
-      state.backgroundX = clamp(backgroundDrag.x - deltaX, 0, 100);
-      state.backgroundY = clamp(backgroundDrag.y - deltaY, 0, 100);
-      render();
-    });
-    const endBackgroundDrag = (event) => {
-      if (!backgroundDrag || backgroundDrag.pointerId !== event.pointerId) return;
-      if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
-      backgroundDrag = null;
-      stage.classList.remove("is-background-dragging");
-    };
-    stage.addEventListener("pointerup", endBackgroundDrag);
-    stage.addEventListener("pointercancel", endBackgroundDrag);
-
-    resetButton?.addEventListener("click", () => {
-      state = defaultStateFor(backgroundChoices[activeBackground]);
-      savedBackgroundStates.delete(activeBackground);
-      render();
-    });
-
-    setDoorSource(doorImage.src, doorImage.alt);
-    render();
-  });
 });
