@@ -2,7 +2,7 @@
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const scriptUrl = document.currentScript?.src || "";
   const originalSrcsets = new WeakMap();
-  let quality = "balanced";
+  let quality = "high";
 
   const detectQuality = () => {
     if (["localhost", "127.0.0.1", "::1"].includes(window.location.hostname)) {
@@ -11,11 +11,10 @@
 
     const effectiveType = String(connection?.effectiveType || "").toLowerCase();
     const downlink = Number(connection?.downlink || 0);
-    if (connection?.saveData || ["slow-2g", "2g", "3g"].includes(effectiveType) || (downlink > 0 && downlink < 2)) {
+    if (connection?.saveData || ["slow-2g", "2g"].includes(effectiveType) || (downlink > 0 && downlink < 1.3)) {
       return "constrained";
     }
-    if (effectiveType === "4g" && (!downlink || downlink >= 5)) return "high";
-    return "balanced";
+    return "high";
   };
 
   const filterSrcset = (srcset) => {
@@ -71,9 +70,9 @@
       const payload = await response.blob();
       const duration = Math.max(performance.now() - startedAt, 1);
       const megabitsPerSecond = (payload.size * 8) / (duration * 1000);
-      applyQuality(megabitsPerSecond < 2 ? "constrained" : (megabitsPerSecond >= 5 ? "high" : "balanced"));
+      applyQuality(megabitsPerSecond < 1.3 ? "constrained" : "high");
     } catch (error) {
-      // Keep the balanced profile when a browser or intermediary blocks the probe.
+      // Keep the high-quality profile when a browser or intermediary blocks the probe.
     }
   };
 
