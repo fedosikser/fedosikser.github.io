@@ -1,5 +1,16 @@
 document.addEventListener("DOMContentLoaded", () => {
   const adaptImageSrcset = (srcset) => window.bastionImagePolicy?.adaptSrcset(srcset) || srcset;
+  const servicesInstallation = document.querySelector(".services-page > .services-installation");
+  const servicesAftercare = document.querySelector(".services-page > .services-aftercare");
+
+  if (
+    servicesInstallation instanceof HTMLElement &&
+    servicesAftercare instanceof HTMLElement &&
+    (servicesInstallation.compareDocumentPosition(servicesAftercare) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
+  ) {
+    servicesAftercare.after(servicesInstallation);
+  }
+
   const pageLoader = document.querySelector("[data-page-loader]");
   const pageLoaderProgress = pageLoader?.querySelector("[data-page-loader-progress]");
   let pageLoaderValue = 0.08;
@@ -89,6 +100,40 @@ document.addEventListener("DOMContentLoaded", () => {
   let catalogHeaderDirectionTravel = 0;
   let pageNavigationPending = false;
   let scrollLockFrame = 0;
+  const servicesTrigger = header?.querySelector(".nav-services-trigger");
+  const servicesHeaderMenu = header?.querySelector(".services-header-menu");
+  let servicesMenuCloseTimer = 0;
+
+  if (
+    header instanceof HTMLElement
+    && servicesTrigger instanceof HTMLAnchorElement
+    && servicesHeaderMenu instanceof HTMLElement
+  ) {
+    const setServicesMenuOpen = (open) => {
+      window.clearTimeout(servicesMenuCloseTimer);
+      header.classList.toggle("services-menu-open", open);
+      servicesTrigger.setAttribute("aria-expanded", String(open));
+    };
+
+    const scheduleServicesMenuClose = () => {
+      window.clearTimeout(servicesMenuCloseTimer);
+      servicesMenuCloseTimer = window.setTimeout(() => {
+        const focusedElement = document.activeElement;
+        const focusRemainsInside = focusedElement === servicesTrigger
+          || servicesHeaderMenu.contains(focusedElement);
+        if (servicesTrigger.matches(":hover") || servicesHeaderMenu.matches(":hover") || focusRemainsInside) return;
+        setServicesMenuOpen(false);
+      }, 420);
+    };
+
+    [servicesTrigger, servicesHeaderMenu].forEach((element) => {
+      element.addEventListener("pointerenter", () => setServicesMenuOpen(true));
+      element.addEventListener("pointerleave", scheduleServicesMenuClose);
+    });
+    servicesTrigger.addEventListener("focus", () => setServicesMenuOpen(true));
+    servicesHeaderMenu.addEventListener("focusin", () => setServicesMenuOpen(true));
+    header.addEventListener("focusout", scheduleServicesMenuClose);
+  }
 
   if (pageStackingIntros.length) {
     let pageStackingResizeFrame = 0;
@@ -688,175 +733,64 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   const deliveryCityForm = document.querySelector("[data-delivery-city-form]");
-  const deliveryMap = document.querySelector(".services-delivery-map");
-  const deliveryRoute = deliveryMap?.querySelector("[data-delivery-custom-route]");
-  const deliveryCourier = deliveryMap?.querySelector("[data-delivery-custom-courier]");
-  const deliveryCity = deliveryMap?.querySelector("[data-delivery-custom-city]");
-  const deliveryCityLabel = deliveryCity?.querySelector("[data-delivery-custom-city-label]");
-  const deliveryCityLabelBackground = deliveryCity?.querySelector("[data-delivery-custom-city-label-bg]");
 
-  if (deliveryCityForm instanceof HTMLFormElement && deliveryMap && deliveryRoute instanceof SVGPathElement && deliveryCourier instanceof SVGCircleElement && deliveryCity instanceof SVGGElement && deliveryCityLabel instanceof SVGTextElement && deliveryCityLabelBackground instanceof SVGRectElement) {
+  if (deliveryCityForm instanceof HTMLFormElement) {
     const input = deliveryCityForm.querySelector("input");
     const submit = deliveryCityForm.querySelector("button[type='submit']");
     const submitLabel = deliveryCityForm.querySelector("[data-delivery-submit-label]");
     const reset = deliveryCityForm.querySelector("[data-delivery-search-reset]");
     const status = deliveryCityForm.querySelector("[data-delivery-city-status]");
-    const feedback = deliveryCityForm.querySelector(".services-delivery-feedback");
-    const mapBounds = { north: 56.4, south: 51.1, west: 22.9, east: 33 };
-    const mapFrame = { x: 40, y: 50, width: 560, height: 500 };
-    const origin = { x: 298, y: 286 };
     const geocoderEndpoint = deliveryCityForm.dataset.geocoderEndpoint || "https://nominatim.openstreetmap.org/search";
     const normalizeCity = (value) => value.trim().toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
     const cityRecords = [
-      ["Минск", 53.9006, 27.559, ["мінск"]],
-      ["Брест", 52.0976, 23.7341, []],
-      ["Витебск", 55.1904, 30.2049, ["віцебск"]],
-      ["Гомель", 52.4345, 30.9754, []],
-      ["Гродно", 53.6694, 23.8131, ["гродна"]],
-      ["Могилёв", 53.9007, 30.3314, ["магілёў"]],
-      ["Барановичи", 53.1327, 26.0139, ["баранавічы"]],
-      ["Бобруйск", 53.1384, 29.2214, ["бабруйск"]],
-      ["Борисов", 54.2279, 28.505, ["барысаў"]],
-      ["Пинск", 52.1214, 26.0728, []],
-      ["Орша", 54.5089, 30.4172, []],
-      ["Мозырь", 52.0495, 29.2456, ["мазыр"]],
-      ["Солигорск", 52.7876, 27.5415, ["салігорск"]],
-      ["Новополоцк", 55.5318, 28.5987, ["наваполацк"]],
-      ["Лида", 53.8833, 25.2997, ["ліда"]],
-      ["Полоцк", 55.4879, 28.7856, ["полацк"]],
-      ["Жлобин", 52.8926, 30.024, ["жлобін"]],
-      ["Светлогорск", 52.6329, 29.7389, ["светлагорск"]],
-      ["Речица", 52.371, 30.3877, ["рэчыца"]],
-      ["Слоним", 53.0869, 25.3217, ["слонім"]],
-      ["Молодечно", 54.3073, 26.8389, ["маладзечна"]],
-      ["Кобрин", 52.2138, 24.3564, ["кобрын"]],
-      ["Калинковичи", 52.1284, 29.325, ["калінкавічы"]],
-      ["Рогачёв", 53.0934, 30.0495, ["рагачоў"]],
-      ["Горки", 54.2861, 30.9864, ["горкі"]],
-      ["Несвиж", 53.2189, 26.6728, ["нясвіж"]],
-      ["Новогрудок", 53.5942, 25.8191, ["навагрудак"]],
+      ["Минск", ["мінск"]],
+      ["Брест", []],
+      ["Витебск", ["віцебск"]],
+      ["Гомель", []],
+      ["Гродно", ["гродна"]],
+      ["Могилёв", ["магілёў"]],
+      ["Барановичи", ["баранавічы"]],
+      ["Бобруйск", ["бабруйск"]],
+      ["Борисов", ["барысаў"]],
+      ["Пинск", []],
+      ["Орша", []],
+      ["Мозырь", ["мазыр"]],
+      ["Солигорск", ["салігорск"]],
+      ["Новополоцк", ["наваполацк"]],
+      ["Лида", ["ліда"]],
+      ["Полоцк", ["полацк"]],
+      ["Жлобин", ["жлобін"]],
+      ["Светлогорск", ["светлагорск"]],
+      ["Речица", ["рэчыца"]],
+      ["Слоним", ["слонім"]],
+      ["Молодечно", ["маладзечна"]],
+      ["Кобрин", ["кобрын"]],
+      ["Калинковичи", ["калінкавічы"]],
+      ["Рогачёв", ["рагачоў"]],
+      ["Горки", ["горкі"]],
+      ["Несвиж", ["нясвіж"]],
+      ["Новогрудок", ["навагрудак"]],
     ];
     const localCities = new Map();
-    cityRecords.forEach(([name, lat, lon, aliases]) => {
-      [name, ...aliases].forEach((alias) => localCities.set(normalizeCity(alias), { name, lat, lon }));
+    cityRecords.forEach(([name, aliases]) => {
+      [name, ...aliases].forEach((alias) => localCities.set(normalizeCity(alias), name));
     });
-    let courierAnimationFrame = 0;
     let requestController = null;
-    let lastRemoteRequestAt = 0;
     let searchRequestId = 0;
-    const mobileDeliveryMap = window.matchMedia("(max-width: 620px)");
-
-    const projectCoordinates = ({ lat, lon }) => ({
-      x: mapFrame.x + ((lon - mapBounds.west) / (mapBounds.east - mapBounds.west)) * mapFrame.width,
-      y: mapFrame.y + ((mapBounds.north - lat) / (mapBounds.north - mapBounds.south)) * mapFrame.height,
-    });
 
     const setSearchState = (state, message) => {
       deliveryCityForm.classList.toggle("is-searching", state === "searching");
       deliveryCityForm.classList.toggle("has-error", state === "error");
       deliveryCityForm.classList.toggle("has-success", state === "success");
       if (submit instanceof HTMLButtonElement) submit.disabled = state === "searching";
-      if (submitLabel) submitLabel.textContent = state === "searching" ? "Ищем…" : "Показать";
+      if (submitLabel) submitLabel.textContent = state === "searching" ? "Проверяем…" : "Проверить";
       if (status) status.textContent = message;
     };
 
-    const revealDeliveryMap = () => {
-      if (!mobileDeliveryMap.matches) return;
-      input?.blur();
-      window.setTimeout(() => {
-        const mapRect = deliveryMap.getBoundingClientRect();
-        const headerHeight = 72;
-        const availableHeight = Math.max(0, window.innerHeight - headerHeight);
-        const centeredMapTop = headerHeight + (availableHeight - mapRect.height) / 2;
-        const targetTop = window.scrollY + mapRect.top - centeredMapTop;
-        window.scrollTo({ left: 0, top: Math.max(0, targetTop), behavior: reducedMotion.matches ? "auto" : "smooth" });
-      }, 220);
-    };
-
-    const drawDeliveryRoute = (record) => {
-      const target = projectCoordinates(record);
-      const dx = target.x - origin.x;
-      const dy = target.y - origin.y;
-      const directDistance = Math.hypot(dx, dy);
-
-      if (directDistance < 8) {
-        deliveryMap.classList.remove("has-custom-route");
-        deliveryMap.classList.add("has-search-result");
-        setSearchState("success", "Отлично, доставим в ваш город");
-        revealDeliveryMap();
-        return;
-      }
-
-      const bend = Math.min(38, directDistance * 0.16);
-      const curveDirection = target.x < origin.x ? -1 : 1;
-      const controlX = (origin.x + target.x) / 2 - (dy / directDistance) * bend * curveDirection;
-      const controlY = (origin.y + target.y) / 2 + (dx / directDistance) * bend * curveDirection;
-      deliveryRoute.setAttribute("d", `M${origin.x} ${origin.y}Q${controlX.toFixed(1)} ${controlY.toFixed(1)} ${target.x.toFixed(1)} ${target.y.toFixed(1)}`);
-      deliveryCity.setAttribute("transform", `translate(${target.x.toFixed(1)} ${target.y.toFixed(1)})`);
-      deliveryCityLabel.textContent = record.name;
-      const labelWidth = Math.max(54, Math.min(116, Math.ceil(deliveryCityLabel.getComputedTextLength() + 20)));
-      deliveryCityLabelBackground.setAttribute("x", `${-labelWidth / 2}`);
-      deliveryCityLabelBackground.setAttribute("width", `${labelWidth}`);
-      deliveryMap.classList.add("has-search-result");
-      deliveryMap.classList.add("has-custom-route");
-
-      window.cancelAnimationFrame(courierAnimationFrame);
-      const routeLength = deliveryRoute.getTotalLength();
-      const duration = Math.min(3800, Math.max(2100, routeLength * 12));
-      const startedAt = performance.now();
-      deliveryRoute.style.strokeDasharray = `${routeLength}`;
-      deliveryRoute.style.strokeDashoffset = `${routeLength}`;
-
-      const placeCourier = (progress) => {
-        const point = deliveryRoute.getPointAtLength(routeLength * progress);
-        deliveryCourier.setAttribute("cx", point.x.toFixed(1));
-        deliveryCourier.setAttribute("cy", point.y.toFixed(1));
-        deliveryRoute.style.strokeDashoffset = `${routeLength * (1 - progress)}`;
-      };
-
-      if (reducedMotion.matches) {
-        placeCourier(1);
-      } else {
-        const animateCourier = (now) => {
-          const linearProgress = Math.min((now - startedAt) / duration, 1);
-          const easedProgress = linearProgress < 0.5
-            ? 4 * linearProgress ** 3
-            : 1 - ((-2 * linearProgress + 2) ** 3) / 2;
-          placeCourier(easedProgress);
-          if (linearProgress < 1) courierAnimationFrame = window.requestAnimationFrame(animateCourier);
-        };
-        courierAnimationFrame = window.requestAnimationFrame(animateCourier);
-      }
-      setSearchState("success", "Отлично, доставим в ваш город");
-      revealDeliveryMap();
-    };
-
-    const readCachedCity = (key) => {
-      try {
-        const value = window.localStorage.getItem(`bastion-city-v2:${key}`);
-        const record = value ? JSON.parse(value) : null;
-        return record && normalizeCity(record.name || "") === key ? record : null;
-      } catch {
-        return null;
-      }
-    };
-    const cacheCity = (key, record) => {
-      try {
-        window.localStorage.setItem(`bastion-city-v2:${key}`, JSON.stringify(record));
-      } catch {
-        // Search still works when local storage is unavailable.
-      }
-    };
-
     const geocodeCity = async (query, key) => {
-      const cached = readCachedCity(key);
-      if (cached) return cached;
-      const waitTime = Math.max(0, 1000 - (Date.now() - lastRemoteRequestAt));
-      if (waitTime) await new Promise((resolve) => window.setTimeout(resolve, waitTime));
       requestController?.abort();
       requestController = new AbortController();
       const timeout = window.setTimeout(() => requestController?.abort(), 7000);
-      lastRemoteRequestAt = Date.now();
       try {
         const params = new URLSearchParams({
           q: `${query}, Беларусь`,
@@ -878,18 +812,7 @@ document.addEventListener("DOMContentLoaded", () => {
             && normalizeCity(resultName) === key
             && result.address?.country_code === "by";
         });
-        if (!place) return null;
-        const record = {
-          name: place.display_name?.split(",")[0] || query,
-          lat: Number.parseFloat(place.lat),
-          lon: Number.parseFloat(place.lon),
-        };
-        const insideBelarus = Number.isFinite(record.lat) && Number.isFinite(record.lon)
-          && record.lat >= mapBounds.south && record.lat <= mapBounds.north
-          && record.lon >= mapBounds.west && record.lon <= mapBounds.east;
-        if (!insideBelarus) return null;
-        cacheCity(key, record);
-        return record;
+        return place ? (place.display_name?.split(",")[0] || query) : null;
       } finally {
         window.clearTimeout(timeout);
       }
@@ -907,21 +830,21 @@ document.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
-      const localRecord = localCities.get(key);
-      if (localRecord) {
-        drawDeliveryRoute(localRecord);
+      const localCity = localCities.get(key);
+      if (localCity) {
+        setSearchState("success", `Доставляем в ${localCity}. Маршрут и стоимость подтвердит менеджер`);
         return;
       }
 
-      setSearchState("searching", "Ищем город на карте…");
+      setSearchState("searching", "Проверяем город…");
       try {
-        const record = await geocodeCity(query, key);
+        const cityName = await geocodeCity(query, key);
         if (requestId !== searchRequestId) return;
-        if (!record) {
+        if (!cityName) {
           setSearchState("error", "Введите белорусский город");
           return;
         }
-        drawDeliveryRoute(record);
+        setSearchState("success", `Доставляем в ${cityName}. Маршрут и стоимость подтвердит менеджер`);
       } catch (error) {
         if (requestId !== searchRequestId) return;
         if (error?.name === "AbortError") setSearchState("error", "Поиск занял слишком много времени. Попробуйте ещё раз");
@@ -943,15 +866,6 @@ document.addEventListener("DOMContentLoaded", () => {
       searchRequestId += 1;
       requestController?.abort();
       requestController = null;
-      window.cancelAnimationFrame(courierAnimationFrame);
-      deliveryMap.classList.remove("has-custom-route", "has-search-result");
-      deliveryRoute.setAttribute("d", "");
-      deliveryRoute.style.removeProperty("stroke-dasharray");
-      deliveryRoute.style.removeProperty("stroke-dashoffset");
-      deliveryCourier.setAttribute("cx", `${origin.x}`);
-      deliveryCourier.setAttribute("cy", `${origin.y}`);
-      deliveryCity.removeAttribute("transform");
-      deliveryCityLabel.textContent = "";
       input.value = "";
       setSearchState("idle", "");
       if (reset instanceof HTMLButtonElement) reset.disabled = true;
@@ -1004,6 +918,15 @@ document.addEventListener("DOMContentLoaded", () => {
       ".services-delivery-copy > *",
       ".services-delivery-map",
       ".services-prep-copy",
+      ".services-directory > a",
+      ".services-information-head",
+      ".services-measurement-intro",
+      ".services-measurement-points > li",
+      ".services-delivery-terms > div",
+      ".services-installation-head > *",
+      ".services-installation-table-wrap",
+      ".services-installation-note",
+      ".services-aftercare > article",
       ".works-intro-copy",
       ".works-list-head",
       ".works-list > article",
@@ -1167,6 +1090,9 @@ document.addEventListener("DOMContentLoaded", () => {
     reviewFlipCards.forEach((card) => {
       const toggle = card.querySelector(".review-flip-toggle");
       if (!(toggle instanceof HTMLButtonElement)) return;
+      let cardPressX = 0;
+      let cardPressY = 0;
+      let cardPressMoved = false;
       card.addEventListener("pointerenter", () => prepareReviewPhoto(card), { once: true });
       toggle.addEventListener("focus", () => prepareReviewPhoto(card), { once: true });
       toggle.addEventListener("click", () => {
@@ -1179,14 +1105,22 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         setReviewFlipState(card, nextState);
       });
-      if (card.closest(".works-page")) {
-        card.addEventListener("click", (event) => {
-          const eventTarget = event.target;
-          if (!(eventTarget instanceof Element) || eventTarget.closest(".review-flip-toggle")) return;
-          if (window.getSelection()?.toString().trim()) return;
-          toggle.click();
-        });
-      }
+      card.addEventListener("pointerdown", (event) => {
+        cardPressX = event.clientX;
+        cardPressY = event.clientY;
+        cardPressMoved = false;
+      });
+      card.addEventListener("pointermove", (event) => {
+        if (Math.hypot(event.clientX - cardPressX, event.clientY - cardPressY) > 8) {
+          cardPressMoved = true;
+        }
+      });
+      card.addEventListener("click", (event) => {
+        const eventTarget = event.target;
+        if (!(eventTarget instanceof Element) || eventTarget.closest(".review-flip-toggle")) return;
+        if (cardPressMoved || window.getSelection()?.toString().trim()) return;
+        toggle.click();
+      });
       card.addEventListener("keydown", (event) => {
         if (event.key !== "Escape" || !card.classList.contains("is-flipped")) return;
         setReviewFlipState(card, false);
@@ -1538,11 +1472,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const stopHeroAutoplay = () => {
       window.clearTimeout(heroAutoplayTimer);
       heroAutoplayTimer = 0;
+      heroDots[0]?.parentElement?.classList.remove("is-autoplay-running");
     };
     const scheduleHeroAutoplay = () => {
       stopHeroAutoplay();
       if (!heroInitialSlideReady || reducedMotion.matches || document.hidden) return;
-      heroAutoplayTimer = window.setTimeout(() => { void showHeroSlide(activeHeroSlide + 1, 1); }, 6000);
+      const dotNavigation = heroDots[0]?.parentElement;
+      if (dotNavigation instanceof HTMLElement) {
+        // Restart the active SVG ring from zero whenever a new slide begins.
+        void dotNavigation.offsetWidth;
+        dotNavigation.classList.add("is-autoplay-running");
+      }
+      heroAutoplayTimer = window.setTimeout(() => { void showHeroSlide(activeHeroSlide + 1, 1); }, 4000);
     };
     const showHeroSlide = async (requestedIndex, direction = 1) => {
       const nextIndex = (requestedIndex + heroSlides.length) % heroSlides.length;
@@ -1846,6 +1787,24 @@ document.addEventListener("DOMContentLoaded", () => {
     let titleMeasureFrame = 0;
     let copyStatusTimer = 0;
     const productTitle = shell.dataset.productTitleFull?.trim() || title.textContent.trim();
+    const measureTitleTruncation = () => {
+      const computedLimit = Number.parseInt(window.getComputedStyle(title).webkitLineClamp, 10);
+      const lineLimit = Number.isFinite(computedLimit) ? computedLimit : (window.matchMedia("(max-width: 620px)").matches ? 2 : 3);
+      const titleRange = document.createRange();
+      titleRange.selectNodeContents(title);
+      const lineTops = Array.from(titleRange.getClientRects()).reduce((tops, rect) => {
+        if (!tops.some((top) => Math.abs(top - rect.top) < 2)) tops.push(rect.top);
+        return tops;
+      }, []);
+      return lineTops.length > lineLimit || title.scrollHeight > title.clientHeight + 1;
+    };
+    const syncTitleAccessibility = () => {
+      const truncated = shell.classList.contains("is-truncated");
+      const expanded = shell.classList.contains("is-expanded");
+      if (truncated) title.setAttribute("aria-expanded", expanded ? "true" : "false");
+      else title.removeAttribute("aria-expanded");
+      title.setAttribute("aria-label", `${productTitle}. Нажмите, чтобы скопировать${truncated && !expanded ? " и раскрыть" : ""} полное название.`);
+    };
     if (copyStatus instanceof HTMLElement) document.body.append(copyStatus);
     const copyProductTitle = async (activationEvent = null) => {
       const titleRect = title.getBoundingClientRect();
@@ -1855,6 +1814,10 @@ document.addEventListener("DOMContentLoaded", () => {
         && (activationEvent.clientX !== 0 || activationEvent.clientY !== 0);
       const activationX = hasPointerPosition ? activationEvent.clientX : titleRect.left + titleRect.width / 2;
       const activationY = hasPointerPosition ? activationEvent.clientY : titleRect.top + titleRect.height / 2;
+      if (!shell.classList.contains("is-expanded") && (shell.classList.contains("is-truncated") || measureTitleTruncation())) {
+        shell.classList.add("is-truncated", "is-expanded");
+        syncTitleAccessibility();
+      }
       if (navigator.clipboard?.writeText) {
         try {
           await navigator.clipboard.writeText(productTitle);
@@ -1901,20 +1864,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const syncTitleTruncation = () => {
       window.cancelAnimationFrame(titleMeasureFrame);
       titleMeasureFrame = window.requestAnimationFrame(() => {
-        const lineLimit = window.matchMedia("(max-width: 620px)").matches ? 2 : 3;
-        const titleRange = document.createRange();
-        titleRange.selectNodeContents(title);
-        const lineTops = Array.from(titleRange.getClientRects()).reduce((tops, rect) => {
-          if (!tops.some((top) => Math.abs(top - rect.top) < 2)) tops.push(rect.top);
-          return tops;
-        }, []);
-        shell.classList.toggle("is-truncated", lineTops.length > lineLimit || title.scrollHeight > title.clientHeight + 1);
+        if (shell.classList.contains("is-expanded")) return;
+        shell.classList.toggle("is-truncated", measureTitleTruncation());
+        syncTitleAccessibility();
       });
     };
 
     title.setAttribute("tabindex", "0");
     title.setAttribute("role", "button");
-    title.setAttribute("aria-label", `${productTitle}. Нажмите, чтобы скопировать полное название.`);
+    syncTitleAccessibility();
     title.addEventListener("click", (event) => copyProductTitle(event));
     title.addEventListener("keydown", (event) => {
       if (!["Enter", " "].includes(event.key)) return;
@@ -1928,6 +1886,21 @@ document.addEventListener("DOMContentLoaded", () => {
     window.addEventListener("load", syncTitleTruncation, { once: true });
     window.addEventListener("resize", syncTitleTruncation, { passive: true });
     syncTitleTruncation();
+  });
+
+  document.querySelectorAll("[data-product-variants]").forEach((variants) => {
+    const scroller = variants.querySelector("[data-product-variant-scroll]");
+    const currentVariant = variants.querySelector(".product-variant.is-current");
+    if (!(scroller instanceof HTMLElement) || !(currentVariant instanceof HTMLElement)) return;
+
+    const syncOverflow = () => scroller.classList.toggle("is-overflowing", scroller.scrollWidth > scroller.clientWidth + 2);
+    window.requestAnimationFrame(() => {
+      syncOverflow();
+      const centeredScrollLeft = currentVariant.offsetLeft - ((scroller.clientWidth - currentVariant.offsetWidth) / 2);
+      scroller.scrollLeft = Math.max(0, centeredScrollLeft);
+    });
+    if ("ResizeObserver" in window) new ResizeObserver(syncOverflow).observe(scroller);
+    else window.addEventListener("resize", syncOverflow, { passive: true });
   });
 
   document.querySelectorAll("[data-product-gallery]").forEach((gallery) => {
@@ -2503,7 +2476,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const advancedReset = catalog.querySelector("[data-catalog-advanced-reset]");
     const mobileHeaderReset = catalog.querySelector("[data-catalog-mobile-reset]");
     const advancedCount = catalog.querySelector("[data-catalog-advanced-count]");
-    const gridToggle = catalog.querySelector("[data-catalog-grid-toggle]");
+    const gridCycleButtons = Array.from(catalog.querySelectorAll("[data-catalog-grid-cycle]"));
     const advancedOptions = Array.from(catalog.querySelectorAll("[data-catalog-advanced-option]"));
     const inlineSearchInput = catalog.querySelector("[data-catalog-inline-search]");
     const inlineTools = catalog.querySelector("[data-catalog-inline-tools]");
@@ -2514,7 +2487,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const inlineFilterButtons = Array.from(catalog.querySelectorAll("[data-catalog-inline-filter]"));
     const inlineOrderButton = catalog.querySelector("[data-catalog-inline-order]");
     const inlineSortButton = catalog.querySelector("[data-catalog-inline-sort]");
-    const inlineGridToggle = catalog.querySelector("[data-catalog-inline-grid]");
     const inlineAdvancedToggle = catalog.querySelector("[data-catalog-inline-advanced-toggle]");
     const inlineAdvancedPanel = catalog.querySelector("[data-catalog-inline-advanced]");
     const quickReset = catalog.querySelector("[data-catalog-quick-reset]");
@@ -2523,7 +2495,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const quickSortButton = catalog.querySelector("[data-catalog-quick-sort]");
     const quickAdvancedToggle = catalog.querySelector("[data-catalog-quick-advanced]");
     const quickAdvancedCount = catalog.querySelector("[data-catalog-quick-advanced-count]");
-    const quickGridToggle = catalog.querySelector("[data-catalog-quick-grid]");
     const priceRange = catalog.querySelector("[data-catalog-price-range]");
     const priceMinRange = catalog.querySelector("[data-catalog-price-min-range]");
     const priceMaxRange = catalog.querySelector("[data-catalog-price-max-range]");
@@ -2562,158 +2533,6 @@ document.addEventListener("DOMContentLoaded", () => {
     };
     window.addEventListener("resize", syncCatalogOverlayScrolling, { passive: true });
     window.visualViewport?.addEventListener("resize", syncCatalogOverlayScrolling, { passive: true });
-
-    const mobileCategoryLoop = window.matchMedia("(max-width: 620px)");
-    const categoryLoopRows = Array.from(catalog.querySelectorAll(".catalog-inline-categories"));
-    let categoryLoopDisposers = [];
-    const createCategoryLoop = (row) => {
-      if (!(row instanceof HTMLElement)) return null;
-      const originals = Array.from(row.children).filter((item) => item instanceof HTMLButtonElement && !item.hasAttribute("data-category-loop-clone"));
-      if (originals.length < 2) return null;
-
-      const controller = new AbortController();
-      const beforeClones = originals.map((original, index) => {
-        const clone = original.cloneNode(true);
-        clone.dataset.categoryLoopClone = "before";
-        clone.dataset.categoryLoopIndex = String(index);
-        clone.setAttribute("aria-hidden", "true");
-        clone.tabIndex = -1;
-        return clone;
-      });
-      const afterClones = originals.map((original, index) => {
-        const clone = original.cloneNode(true);
-        clone.dataset.categoryLoopClone = "after";
-        clone.dataset.categoryLoopIndex = String(index);
-        clone.setAttribute("aria-hidden", "true");
-        clone.tabIndex = -1;
-        return clone;
-      });
-      const beforeFragment = document.createDocumentFragment();
-      beforeClones.forEach((clone) => beforeFragment.append(clone));
-      row.insertBefore(beforeFragment, originals[0]);
-      row.append(...afterClones);
-      row.classList.add("is-looping");
-
-      const cloneGroups = [beforeClones, afterClones];
-      const syncClones = () => {
-        originals.forEach((original, index) => {
-          cloneGroups.forEach((group) => {
-            const clone = group[index];
-            clone.className = original.className;
-            clone.setAttribute("aria-pressed", original.getAttribute("aria-pressed") || "false");
-          });
-        });
-      };
-      const originalObserver = new MutationObserver(syncClones);
-      originals.forEach((original) => originalObserver.observe(original, { attributes: true, attributeFilter: ["class", "aria-pressed"] }));
-
-      let cycleWidth = 0;
-      let pauseUntil = performance.now() + 1400;
-      let interacting = false;
-      let visible = true;
-      let animationFrame = 0;
-      let scrollFrame = 0;
-      let lastFrameTime = 0;
-      const normalizeScroll = () => {
-        if (cycleWidth <= 0) return;
-        if (row.scrollLeft < cycleWidth * 0.5) row.scrollLeft += cycleWidth;
-        else if (row.scrollLeft >= cycleWidth * 1.5) row.scrollLeft -= cycleWidth;
-      };
-      const measureLoop = () => {
-        const nextCycleWidth = afterClones[0].offsetLeft - originals[0].offsetLeft;
-        if (nextCycleWidth <= 0) return;
-        const previousCycleWidth = cycleWidth;
-        const cycleOffset = previousCycleWidth > 0
-          ? ((row.scrollLeft - previousCycleWidth) % previousCycleWidth + previousCycleWidth) % previousCycleWidth
-          : 0;
-        cycleWidth = nextCycleWidth;
-        row.scrollLeft = cycleWidth + cycleOffset;
-      };
-      const pauseAutoscroll = (duration = 4200) => {
-        pauseUntil = performance.now() + duration;
-      };
-      const handleCloneClick = (event) => {
-        const clone = event.currentTarget;
-        const source = originals[Number(clone.dataset.categoryLoopIndex)];
-        if (!(source instanceof HTMLButtonElement)) return;
-        event.preventDefault();
-        pauseAutoscroll();
-        source.click();
-      };
-      [...beforeClones, ...afterClones].forEach((clone) => clone.addEventListener("click", handleCloneClick, { signal: controller.signal }));
-
-      row.addEventListener("pointerdown", () => {
-        interacting = true;
-        pauseAutoscroll();
-      }, { passive: true, signal: controller.signal });
-      ["pointerup", "pointercancel", "pointerleave"].forEach((eventName) => row.addEventListener(eventName, () => {
-        interacting = false;
-        pauseAutoscroll();
-      }, { passive: true, signal: controller.signal }));
-      row.addEventListener("wheel", () => pauseAutoscroll(), { passive: true, signal: controller.signal });
-      row.addEventListener("focusin", () => {
-        interacting = true;
-        pauseAutoscroll();
-      }, { signal: controller.signal });
-      row.addEventListener("focusout", (event) => {
-        if (event.relatedTarget instanceof Node && row.contains(event.relatedTarget)) return;
-        interacting = false;
-        pauseAutoscroll();
-      }, { signal: controller.signal });
-      row.addEventListener("scroll", () => {
-        if (scrollFrame) return;
-        scrollFrame = window.requestAnimationFrame(() => {
-          scrollFrame = 0;
-          normalizeScroll();
-        });
-      }, { passive: true, signal: controller.signal });
-
-      const resizeObserver = "ResizeObserver" in window ? new ResizeObserver(measureLoop) : null;
-      resizeObserver?.observe(row);
-      const visibilityObserver = "IntersectionObserver" in window
-        ? new IntersectionObserver((entries) => {
-          visible = entries.some((entry) => entry.isIntersecting);
-        }, { threshold: 0.01 })
-        : null;
-      visibilityObserver?.observe(row);
-
-      const animate = (time) => {
-        const delta = lastFrameTime ? Math.min(34, time - lastFrameTime) : 0;
-        lastFrameTime = time;
-        if (visible && !document.hidden && !interacting && !reducedMotion.matches && time >= pauseUntil && cycleWidth > 0) {
-          // scrollLeft accepts fractional values. Moving every frame avoids the
-          // visible one-pixel cadence that made the slow loop look jerky.
-          row.scrollLeft += delta * 0.014;
-          normalizeScroll();
-        }
-        animationFrame = window.requestAnimationFrame(animate);
-      };
-      syncClones();
-      window.requestAnimationFrame(measureLoop);
-      animationFrame = window.requestAnimationFrame(animate);
-
-      return () => {
-        controller.abort();
-        originalObserver.disconnect();
-        resizeObserver?.disconnect();
-        visibilityObserver?.disconnect();
-        window.cancelAnimationFrame(animationFrame);
-        window.cancelAnimationFrame(scrollFrame);
-        [...beforeClones, ...afterClones].forEach((clone) => clone.remove());
-        row.classList.remove("is-looping");
-        row.scrollLeft = 0;
-      };
-    };
-    const syncMobileCategoryLoops = () => {
-      categoryLoopDisposers.forEach((dispose) => dispose());
-      categoryLoopDisposers = [];
-      if (!mobileCategoryLoop.matches) return;
-      categoryLoopRows.forEach((row) => {
-        const dispose = createCategoryLoop(row);
-        if (dispose) categoryLoopDisposers.push(dispose);
-      });
-    };
-    mobileCategoryLoop.addEventListener("change", syncMobileCategoryLoops);
 
     const catalogSortStatus = document.createElement("span");
     catalogSortStatus.className = "product-title-copy-status catalog-sort-status";
@@ -2846,12 +2665,14 @@ document.addEventListener("DOMContentLoaded", () => {
         ["pointerdown", "keydown", "input"].forEach((eventName) => input.addEventListener(eventName, stopPriceRangeHints, { once: true }));
       });
     });
-    const catalogGridKey = "bastion-catalog-grid";
-    const desktopCatalogGrid = window.matchMedia("(min-width: 901px)");
-    const syncCatalogImageSizes = (singleColumn) => {
-      const sizes = singleColumn
-        ? "(max-width: 520px) 100vw, (max-width: 900px) 50vw, 33vw"
-        : "(max-width: 520px) 50vw, (max-width: 900px) 33vw, 25vw";
+    const catalogGridKey = "bastion-catalog-grid-v3";
+    const catalogGridModes = ["large", "medium", "compact"];
+    const syncCatalogImageSizes = (mode) => {
+      const sizes = mode === "large"
+        ? "(max-width: 620px) 50vw, (max-width: 900px) 33vw, 25vw"
+        : mode === "compact"
+          ? "(max-width: 620px) 50vw, (max-width: 900px) 20vw, 14vw"
+          : "(max-width: 620px) 50vw, (max-width: 900px) 25vw, 20vw";
       grid.querySelectorAll(".product-image img").forEach((image) => {
         if (!(image instanceof HTMLImageElement)) return;
         image.sizes = sizes;
@@ -2862,40 +2683,36 @@ document.addEventListener("DOMContentLoaded", () => {
         else image.srcset = responsiveSrcset;
       });
     };
-    const setCatalogGrid = (singleColumn, persist = true) => {
-      grid.classList.toggle("is-single-column", singleColumn);
-      syncCatalogImageSizes(singleColumn);
-      const expandedGridLabel = desktopCatalogGrid.matches
-        ? (singleColumn ? "Показать товары по четыре карточки" : "Показать товары по три карточки")
-        : (singleColumn ? "Показать товары по две карточки" : "Показать товары по одной карточке");
-      if (gridToggle instanceof HTMLButtonElement) {
-        gridToggle.setAttribute("aria-pressed", String(singleColumn));
-        gridToggle.setAttribute("aria-label", expandedGridLabel);
-      }
-      if (quickGridToggle instanceof HTMLButtonElement) {
-        quickGridToggle.setAttribute("aria-pressed", String(singleColumn));
-        quickGridToggle.setAttribute("aria-label", expandedGridLabel);
-      }
-      if (inlineGridToggle instanceof HTMLButtonElement) {
-        inlineGridToggle.setAttribute("aria-pressed", String(singleColumn));
-        inlineGridToggle.setAttribute("aria-label", expandedGridLabel);
-      }
+    const setCatalogGrid = (requestedMode, persist = true) => {
+      const mode = catalogGridModes.includes(requestedMode) ? requestedMode : "medium";
+      grid.classList.remove("is-single-column");
+      grid.dataset.gridMode = mode;
+      syncCatalogImageSizes(mode);
+      const nextMode = catalogGridModes[(catalogGridModes.indexOf(mode) + 1) % catalogGridModes.length];
+      const modeCount = { large: 4, medium: 5, compact: 7 };
+      const modeNoun = mode === "large" ? "карточки" : "карточек";
+      gridCycleButtons.forEach((button) => {
+        button.dataset.gridMode = mode;
+        button.setAttribute("aria-label", `Сетка: ${modeCount[mode]} ${modeNoun} в ряд${mode === "compact" ? ", без подписей" : ""}. Переключить на ${modeCount[nextMode]}`);
+      });
       if (!persist) return;
       try {
-        window.localStorage.setItem(catalogGridKey, singleColumn ? "one" : "two");
+        window.localStorage.setItem(catalogGridKey, mode);
       } catch {
         // The selected layout remains active for the current page when storage is unavailable.
       }
     };
-    let savedCatalogGrid = "two";
+    let savedCatalogGrid = "medium";
     try {
-      savedCatalogGrid = window.localStorage.getItem(catalogGridKey) || "two";
+      savedCatalogGrid = window.localStorage.getItem(catalogGridKey) || "medium";
     } catch {
-      savedCatalogGrid = "two";
+      savedCatalogGrid = "medium";
     }
-    setCatalogGrid(savedCatalogGrid === "one", false);
-    gridToggle?.addEventListener("click", () => setCatalogGrid(!grid.classList.contains("is-single-column")));
-    desktopCatalogGrid.addEventListener("change", () => setCatalogGrid(grid.classList.contains("is-single-column"), false));
+    setCatalogGrid(savedCatalogGrid, false);
+    gridCycleButtons.forEach((button) => button.addEventListener("click", () => {
+      const currentIndex = catalogGridModes.indexOf(grid.dataset.gridMode || "medium");
+      setCatalogGrid(catalogGridModes[(currentIndex + 1) % catalogGridModes.length]);
+    }));
     cards.forEach((card, index) => { card.dataset.catalogOrder = String(index); });
     const catalogImageLoads = new WeakMap();
     const hydrateDeferredImage = (image) => {
@@ -3523,8 +3340,6 @@ document.addEventListener("DOMContentLoaded", () => {
     quickSortButton?.addEventListener("click", (event) => cycleCatalogSort(quickSortButton, event));
     inlineOrderButton?.addEventListener("click", () => cycleCatalogOrder(inlineOrderButton));
     inlineSortButton?.addEventListener("click", (event) => cycleCatalogSort(inlineSortButton, event));
-    quickGridToggle?.addEventListener("click", () => gridToggle?.click());
-    inlineGridToggle?.addEventListener("click", () => gridToggle?.click());
     quickAdvancedToggle?.addEventListener("click", () => {
       const isOpen = !document.body.classList.contains("catalog-scroll-advanced-open");
       document.body.classList.toggle("catalog-scroll-advanced-open", isOpen);
@@ -3536,6 +3351,15 @@ document.addEventListener("DOMContentLoaded", () => {
       ["height", "marginTop", "paddingTop", "opacity", "transform", "overflow"].forEach((property) => {
         inlineAdvancedPanel.style[property] = "";
       });
+    };
+    const resetInlineAdvancedClosed = () => {
+      if (!(inlineAdvancedToggle instanceof HTMLButtonElement) || !(inlineAdvancedPanel instanceof HTMLElement)) return;
+      inlineAdvancedPanel.getAnimations().forEach((animation) => animation.cancel());
+      resetInlineAdvancedStyles();
+      inlineAdvancedPanel.hidden = true;
+      inlineAdvancedToggle.classList.remove("is-open");
+      inlineAdvancedToggle.setAttribute("aria-expanded", "false");
+      inlineAdvancedToggle.setAttribute("aria-label", "Открыть расширенные фильтры");
     };
     const setInlineAdvancedOpen = (isOpen) => {
       if (!(inlineAdvancedToggle instanceof HTMLButtonElement) || !(inlineAdvancedPanel instanceof HTMLElement)) return;
@@ -3583,6 +3407,8 @@ document.addEventListener("DOMContentLoaded", () => {
     inlineAdvancedToggle?.addEventListener("click", () => {
       setInlineAdvancedOpen(inlineAdvancedToggle.getAttribute("aria-expanded") !== "true");
     });
+    resetInlineAdvancedClosed();
+    window.addEventListener("pageshow", resetInlineAdvancedClosed);
     advancedToggle?.addEventListener("click", () => setAdvancedPanelOpen(advancedToggle.getAttribute("aria-expanded") !== "true"));
     const toggleAdvancedOption = (button) => {
       const isActive = button.getAttribute("aria-pressed") === "true";
@@ -3813,7 +3639,6 @@ document.addEventListener("DOMContentLoaded", () => {
     inlineReset?.addEventListener("click", () => resetCatalogFilters());
     quickReset?.addEventListener("click", () => resetCatalogFilters());
     showAllButton?.addEventListener("click", () => resetCatalogFilters());
-    syncMobileCategoryLoops();
     syncCatalogSearchActions();
     const loadNextCatalogBatch = (preserveScroll = true) => {
       if (!(loadMoreButton instanceof HTMLButtonElement) || loadMoreWrap?.hidden) return false;
@@ -4264,6 +4089,35 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  document.querySelectorAll("[data-product-variant-url]").forEach((variantLink) => {
+    const openVariant = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const url = variantLink.getAttribute("data-product-variant-url");
+      if (!url) return;
+      const catalog = variantLink.closest("[data-catalog]");
+      if (catalog) {
+        const visibleLimit = catalog.querySelectorAll("[data-catalog-grid] > .product-card:not([hidden])").length;
+        try {
+          window.sessionStorage.setItem(catalogReturnKey, JSON.stringify({
+            url: window.location.href,
+            scrollY: window.scrollY,
+            visibleLimit,
+            restore: false,
+          }));
+        } catch {
+          // Navigation still works when storage is disabled.
+        }
+      }
+      window.location.href = url;
+    };
+
+    variantLink.addEventListener("click", openVariant);
+    variantLink.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") openVariant(event);
+    });
+  });
+
   document.querySelectorAll("[data-clearable-field]").forEach((field) => {
     const input = field.querySelector("input, textarea");
     const clearButton = field.querySelector("[data-field-clear]");
@@ -4368,7 +4222,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const input = field?.querySelector("[data-contact-identity-input]");
     const label = field?.querySelector("[data-contact-identity-label]");
     const clearButton = field?.querySelector("[data-field-clear]");
-    const methodInputs = form.querySelectorAll('input[name="contact-method"]');
+    const methodControl = form.querySelector('[name="contact-method"]');
     if (!(input instanceof HTMLInputElement) || !(label instanceof HTMLElement)) return;
 
     const phoneLabel = "Телефон";
@@ -4419,15 +4273,13 @@ document.addEventListener("DOMContentLoaded", () => {
       return /^375(25|29|33|44)\d{7}$/.test(digits) ? `+${digits}` : "";
     };
     const isTelegramUsername = (value) => /^@?[a-z][a-z0-9_]{4,31}$/i.test(value.trim());
-    const selectedMethod = () => form.querySelector('input[name="contact-method"]:checked')?.value || "call";
+    const selectedMethod = () => methodControl?.value || "call";
     const isTelegramSelected = () => selectedMethod() === "telegram";
-    const isOtherSelected = () => selectedMethod() === "other";
 
     const validateIdentity = () => {
       const value = input.value.trim();
       input.setCustomValidity("");
       if (!value) return true;
-      if (isOtherSelected()) return true;
       const isValid = isTelegramSelected()
         ? Boolean(normalizeBelarusPhone(value)) || isTelegramUsername(value)
         : Boolean(normalizeBelarusPhone(value));
@@ -4441,10 +4293,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const syncIdentityField = (animate = false) => {
       const telegram = isTelegramSelected();
-      const other = isOtherSelected();
-      const textMode = telegram || other;
-      const currentLabel = other ? "Другой способ связи" : (telegram ? phoneLabel + telegramLabelSuffix : phoneLabel);
-      const currentPlaceholder = other ? "Почта, ссылка или другой контакт" : (telegram ? phonePlaceholder + telegramPlaceholderSuffix : phonePlaceholder);
+      const textMode = telegram;
+      const currentLabel = telegram ? phoneLabel + telegramLabelSuffix : phoneLabel;
+      const currentPlaceholder = telegram ? phonePlaceholder + telegramPlaceholderSuffix : phonePlaceholder;
       input.type = textMode ? "text" : "tel";
       input.inputMode = textMode ? "text" : "tel";
       input.autocomplete = textMode ? "off" : "tel";
@@ -4457,15 +4308,12 @@ document.addEventListener("DOMContentLoaded", () => {
         input.placeholder = currentPlaceholder;
       }
       if (clearButton instanceof HTMLButtonElement) {
-        clearButton.setAttribute("aria-label", other ? "Очистить другой способ связи" : (telegram ? "Очистить телефон или имя пользователя" : "Очистить номер телефона"));
+        clearButton.setAttribute("aria-label", telegram ? "Очистить телефон или имя пользователя" : "Очистить номер телефона");
       }
       input.setCustomValidity("");
     };
 
-    methodInputs.forEach((methodInput) => methodInput.addEventListener("change", () => {
-      syncIdentityField(true);
-      if (methodInput.value === "other" && methodInput.checked) input.focus({ preventScroll: true });
-    }));
+    methodControl?.addEventListener("change", () => syncIdentityField(true));
     input.addEventListener("input", () => input.setCustomValidity(""));
     input.addEventListener("blur", validateIdentity);
     form.addEventListener("submit", (event) => {
