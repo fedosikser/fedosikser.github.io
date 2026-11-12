@@ -1130,6 +1130,38 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  const worksList = document.querySelector(".works-page .works-list");
+  if (worksList instanceof HTMLElement) {
+    const reviewCards = Array.from(worksList.querySelectorAll(":scope > article"));
+    const loadMoreWrap = worksList.querySelector("[data-works-load-more-wrap]");
+    const loadMoreButton = worksList.querySelector("[data-works-load-more]");
+    const loadStatus = worksList.querySelector("[data-works-load-status]");
+    const batchSize = 6;
+    if (reviewCards.length > batchSize && loadMoreWrap instanceof HTMLElement && loadMoreButton instanceof HTMLButtonElement) {
+      let visibleCount = batchSize;
+      reviewCards.slice(visibleCount).forEach((card) => { card.hidden = true; });
+      const syncProgress = () => {
+        loadStatus.textContent = `${visibleCount} из ${reviewCards.length}`;
+        loadMoreWrap.hidden = visibleCount >= reviewCards.length;
+      };
+      const loadNextBatch = () => {
+        if (loadMoreWrap.hidden) return;
+        const nextCount = Math.min(visibleCount + batchSize, reviewCards.length);
+        reviewCards.slice(visibleCount, nextCount).forEach((card) => { card.hidden = false; });
+        visibleCount = nextCount;
+        syncProgress();
+      };
+      loadMoreButton.addEventListener("click", loadNextBatch);
+      syncProgress();
+      if ("IntersectionObserver" in window) {
+        const loadObserver = new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) loadNextBatch();
+        }, { rootMargin: "0px 0px 480px 0px", threshold: 0 });
+        loadObserver.observe(loadMoreWrap);
+      }
+    }
+  }
+
   const homeCollectionStream = document.querySelector("body.home .collection-grid");
   if (homeCollectionStream instanceof HTMLElement) {
     const mobileCollectionLoop = window.matchMedia("(max-width: 620px)");
@@ -1356,8 +1388,11 @@ document.addEventListener("DOMContentLoaded", () => {
       || image.closest("[data-door-configurator]")
     ) return;
 
+    // Deferred catalog images have their own loader, which waits for decode and paint.
+    if (isCatalogProductImage && deferredSource) return;
+
     if (!isCatalogProductImage) image.classList.add("film-toned-image");
-    if (image.classList.contains("product-image-alt")) return;
+    if (image.classList.contains("product-image-alt") || image.classList.contains("product-image-mockup")) return;
     const frame = image.closest(filmFrameSelector);
     if (!frame) return;
 
@@ -1563,6 +1598,138 @@ document.addEventListener("DOMContentLoaded", () => {
       firstHeroSlide.addEventListener("error", startDeferredHeroSlides, { once: true });
     } else {
       startDeferredHeroSlides();
+    }
+  }
+
+  const storyCarousel = document.querySelector("[data-story-carousel]");
+  if (storyCarousel) {
+    const stage = storyCarousel.querySelector(".story-showcase-stage");
+    const slides = Array.from(storyCarousel.querySelectorAll("[data-story-slide]"));
+    const captions = Array.from(storyCarousel.querySelectorAll("[data-story-caption]"));
+    const dots = Array.from(storyCarousel.querySelectorAll("[data-story-dot]"));
+    let activeIndex = 0;
+    let visible = false;
+    let timer = 0;
+    let transitionId = 0;
+    let touchStart = null;
+    let suppressSwipeClick = false;
+    let wheelDelta = 0;
+    let wheelLocked = false;
+    let wheelReleaseTimer = 0;
+    const slideLoads = new WeakMap();
+
+    const hydrateSlide = (slide) => {
+      const image = slide?.querySelector("img");
+      if (!(image instanceof HTMLImageElement)) return Promise.resolve();
+      if (slideLoads.has(image)) return slideLoads.get(image);
+      if (!image.dataset.src) return Promise.resolve();
+      const loaded = new Promise((resolve) => {
+        image.addEventListener("load", resolve, { once: true });
+        image.addEventListener("error", resolve, { once: true });
+      });
+      slideLoads.set(image, loaded);
+      image.src = image.dataset.src;
+      delete image.dataset.src;
+      return image.complete ? Promise.resolve() : loaded;
+    };
+
+    const stopAutoplay = () => {
+      window.clearTimeout(timer);
+      timer = 0;
+      dots[0]?.parentElement?.classList.remove("is-autoplay-running");
+    };
+    const scheduleAutoplay = () => {
+      stopAutoplay();
+      if (slides.length < 2 || !visible || reducedMotion.matches || document.hidden) return;
+      const navigation = dots[0]?.parentElement;
+      if (navigation) {
+        void navigation.offsetWidth;
+        navigation.classList.add("is-autoplay-running");
+      }
+      timer = window.setTimeout(() => { void showSlide(activeIndex + 1); }, 5000);
+    };
+    const showSlide = async (requestedIndex) => {
+      const nextIndex = (requestedIndex + slides.length) % slides.length;
+      if (nextIndex === activeIndex) {
+        scheduleAutoplay();
+        return;
+      }
+      stopAutoplay();
+      const requestId = ++transitionId;
+      await hydrateSlide(slides[nextIndex]);
+      if (requestId !== transitionId) return;
+      slides.forEach((slide, index) => {
+        const isActive = index === nextIndex;
+        slide.classList.toggle("is-active", isActive);
+        slide.setAttribute("aria-hidden", String(!isActive));
+        slide.tabIndex = isActive ? 0 : -1;
+        captions[index]?.classList.toggle("is-active", isActive);
+        captions[index]?.setAttribute("aria-hidden", String(!isActive));
+        if (captions[index]) captions[index].tabIndex = isActive ? 0 : -1;
+        dots[index]?.setAttribute("aria-current", String(isActive));
+      });
+      activeIndex = nextIndex;
+      void hydrateSlide(slides[(activeIndex + 1) % slides.length]);
+      scheduleAutoplay();
+    };
+
+    dots.forEach((dot) => dot.addEventListener("click", () => {
+      void showSlide(Number(dot.dataset.storyDot));
+    }));
+    if (stage instanceof HTMLElement && slides.length > 1) {
+      stage.addEventListener("touchstart", (event) => {
+        const touch = event.changedTouches[0];
+        touchStart = event.touches.length === 1 && touch ? { x: touch.clientX, y: touch.clientY } : null;
+      }, { passive: true });
+      stage.addEventListener("touchend", (event) => {
+        if (!touchStart) return;
+        const touch = event.changedTouches[0];
+        const distanceX = (touch?.clientX ?? touchStart.x) - touchStart.x;
+        const distanceY = (touch?.clientY ?? touchStart.y) - touchStart.y;
+        touchStart = null;
+        if (Math.abs(distanceX) < 45 || Math.abs(distanceX) < Math.abs(distanceY) * 1.15) return;
+        event.preventDefault();
+        suppressSwipeClick = true;
+        window.setTimeout(() => { suppressSwipeClick = false; }, 350);
+        void showSlide(activeIndex + (distanceX < 0 ? 1 : -1));
+      }, { passive: false });
+      stage.addEventListener("touchcancel", () => { touchStart = null; }, { passive: true });
+      stage.addEventListener("click", (event) => {
+        if (!suppressSwipeClick) return;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      }, { capture: true });
+      stage.addEventListener("wheel", (event) => {
+        const clearlyHorizontal = event.shiftKey
+          || Math.abs(event.deltaX) > Math.abs(event.deltaY) * 1.35;
+        if (!clearlyHorizontal) return;
+        const horizontalDelta = event.shiftKey ? event.deltaY : event.deltaX;
+        if (Math.abs(horizontalDelta) < 6) return;
+        event.preventDefault();
+        window.clearTimeout(wheelReleaseTimer);
+        wheelReleaseTimer = window.setTimeout(() => {
+          wheelDelta = 0;
+          wheelLocked = false;
+        }, 260);
+        if (wheelLocked) return;
+        wheelDelta += horizontalDelta;
+        if (Math.abs(wheelDelta) < 34) return;
+        wheelLocked = true;
+        void showSlide(activeIndex + (wheelDelta > 0 ? 1 : -1));
+      }, { passive: false });
+    }
+    document.addEventListener("visibilitychange", scheduleAutoplay);
+    reducedMotion.addEventListener("change", scheduleAutoplay);
+    if ("IntersectionObserver" in window) {
+      const observer = new IntersectionObserver((entries) => {
+        visible = entries.some((entry) => entry.isIntersecting);
+        if (visible && slides.length > 1) void hydrateSlide(slides[1]);
+        scheduleAutoplay();
+      }, { threshold: 0.25 });
+      observer.observe(storyCarousel);
+    } else {
+      visible = true;
+      scheduleAutoplay();
     }
   }
 
@@ -1779,6 +1946,40 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  document.querySelectorAll("[data-product-sku-copy]").forEach((button) => {
+    const sku = button.dataset.productSkuCopy;
+    const status = button.parentElement?.querySelector("[data-product-sku-copy-status]");
+    if (!sku) return;
+    let resetTimer = 0;
+    button.addEventListener("click", async () => {
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(sku);
+          copied = true;
+        } catch {
+          // Use the selection-based fallback below.
+        }
+      }
+      if (!copied) {
+        const input = document.createElement("textarea");
+        input.value = sku;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.opacity = "0";
+        document.body.append(input);
+        input.select();
+        copied = document.execCommand("copy");
+        input.remove();
+      }
+      if (status) {
+        window.clearTimeout(resetTimer);
+        status.textContent = copied ? "Скопировано" : "Не удалось скопировать";
+        resetTimer = window.setTimeout(() => { status.textContent = ""; }, 2200);
+      }
+    });
+  });
+
   document.querySelectorAll("[data-product-title]").forEach((shell) => {
     const title = shell.querySelector("[data-product-title-scroll]");
     const copyStatus = shell.querySelector("[data-product-title-copy-status]");
@@ -1905,21 +2106,26 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.querySelectorAll("[data-product-gallery]").forEach((gallery) => {
     const viewport = gallery.querySelector("[data-gallery-viewport]");
-    const gallerySlides = Array.from(gallery.querySelectorAll("[data-gallery-slide]"));
-    const galleryDots = Array.from(gallery.querySelectorAll("[data-gallery-dot]"));
+    const allGallerySlides = Array.from(gallery.querySelectorAll("[data-gallery-slide]"));
+    const allGalleryDots = Array.from(gallery.querySelectorAll("[data-gallery-dot]"));
     const gallerySwipeHint = gallery.querySelector("[data-product-gallery-swipe-hint]");
-    const galleryImages = Array.from(gallery.querySelectorAll("[data-gallery-image-index]"));
+    const allGalleryImages = Array.from(gallery.querySelectorAll("[data-gallery-image-index]"));
     const lightbox = gallery.querySelector("[data-gallery-lightbox]");
     const lightboxFigure = gallery.querySelector(".gallery-lightbox-figure");
     const lightboxImage = gallery.querySelector("[data-gallery-lightbox-image]");
     const lightboxPrevious = gallery.querySelector("[data-gallery-lightbox-prev]");
     const lightboxNext = gallery.querySelector("[data-gallery-lightbox-next]");
     const lightboxCloseButtons = Array.from(gallery.querySelectorAll("[data-gallery-lightbox-close]"));
-    const lightboxThumbnails = Array.from(gallery.querySelectorAll("[data-gallery-lightbox-thumb]"));
+    const allLightboxThumbnails = Array.from(gallery.querySelectorAll("[data-gallery-lightbox-thumb]"));
     const lightboxThumbnailTrack = lightbox.querySelector(".gallery-lightbox-thumbnails");
     const lightboxCurrent = gallery.querySelector("[data-gallery-lightbox-current]");
+    const lightboxTotal = gallery.querySelector("[data-gallery-lightbox-total]");
     const mobileGalleryLayout = window.matchMedia("(max-width: 620px)");
     const canAutoplay = window.matchMedia("(prefers-reduced-motion: no-preference)");
+    let gallerySlides = [];
+    let galleryDots = [];
+    let galleryImages = [];
+    let lightboxThumbnails = [];
     let selectedLightboxImage = null;
     let lightboxImageIndex = 0;
     let lightboxScale = 1;
@@ -1935,10 +2141,8 @@ document.addEventListener("DOMContentLoaded", () => {
     let suppressLightboxClick = false;
     let thumbnailOverflowFrame = 0;
     let galleryScrollFrame = 0;
-    let galleryZoomFrame = 0;
     let galleryAutoplayTimer = 0;
     let activeGallerySlideIndex = 0;
-    let zoomedGallerySlideIndex = -1;
     let galleryIsVisible = true;
     let galleryIsInteracting = false;
     let galleryGestureStartX = 0;
@@ -1951,7 +2155,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const gallerySwipeLearnedKey = "bastion-product-gallery-swipe-learned-v3";
     const gallerySwipeLearnedCookie = "bastion_gallery_swipe_learned_v3";
 
-    if (!viewport || galleryImages.length === 0 || !lightbox || !lightboxImage || lightboxCloseButtons.length === 0) return;
+    if (!viewport || allGalleryImages.length === 0 || !lightbox || !lightboxImage || lightboxCloseButtons.length === 0) return;
+    const syncGalleryItems = () => {
+      const visibleOnDevice = (item) => !mobileGalleryLayout.matches || !item.hasAttribute("data-mobile-gallery-hidden");
+      gallerySlides = allGallerySlides.filter(visibleOnDevice);
+      galleryDots = allGalleryDots.filter(visibleOnDevice);
+      galleryImages = allGalleryImages
+        .filter((image) => !mobileGalleryLayout.matches || !image.closest("[data-mobile-gallery-hidden]"))
+        .sort((left, right) => Number(left.dataset.galleryImageIndex) - Number(right.dataset.galleryImageIndex));
+      lightboxThumbnails = allLightboxThumbnails.filter(visibleOnDevice);
+      galleryDots.forEach((dot, index) => dot.setAttribute("aria-label", `Показать фотографию ${index + 1}`));
+      lightboxThumbnails.forEach((thumbnail, index) => thumbnail.setAttribute("aria-label", `Открыть фотографию ${index + 1}`));
+      if (lightboxTotal) lightboxTotal.textContent = String(galleryImages.length).padStart(2, "0");
+    };
+    syncGalleryItems();
     if (gallerySwipeHint instanceof HTMLElement) document.body.append(gallerySwipeHint);
     if (lightbox) document.body.append(lightbox);
 
@@ -2001,23 +2218,6 @@ document.addEventListener("DOMContentLoaded", () => {
       galleryAutoplayTimer = 0;
     };
 
-    const syncGalleryZoom = (slideIndex) => {
-      if (!mobileGalleryLayout.matches || !canAutoplay.matches) {
-        gallerySlides.forEach((slide) => slide.classList.remove("is-gallery-zooming"));
-        zoomedGallerySlideIndex = -1;
-        return;
-      }
-      if (slideIndex === zoomedGallerySlideIndex) return;
-      zoomedGallerySlideIndex = slideIndex;
-      window.cancelAnimationFrame(galleryZoomFrame);
-      gallerySlides.forEach((slide) => slide.classList.remove("is-gallery-zooming"));
-      galleryZoomFrame = window.requestAnimationFrame(() => {
-        galleryZoomFrame = window.requestAnimationFrame(() => {
-          gallerySlides[slideIndex]?.classList.add("is-gallery-zooming");
-        });
-      });
-    };
-
     const syncGalleryPagination = () => {
       window.cancelAnimationFrame(galleryScrollFrame);
       galleryScrollFrame = window.requestAnimationFrame(() => {
@@ -2030,7 +2230,6 @@ document.addEventListener("DOMContentLoaded", () => {
         galleryDots.forEach((dot, dotIndex) => {
           dot.setAttribute("aria-current", dotIndex === activeGallerySlideIndex ? "true" : "false");
         });
-        syncGalleryZoom(activeGallerySlideIndex);
       });
     };
 
@@ -2062,8 +2261,10 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       syncGalleryPagination();
     }, { passive: true });
-    galleryDots.forEach((dot, dotIndex) => {
+    allGalleryDots.forEach((dot) => {
       dot.addEventListener("click", () => {
+        const dotIndex = galleryDots.indexOf(dot);
+        if (dotIndex < 0) return;
         dismissGallerySwipeHint();
         viewport.scrollTo({ left: gallerySlides[dotIndex].offsetLeft, behavior: "smooth" });
         activeGallerySlideIndex = dotIndex;
@@ -2129,9 +2330,16 @@ document.addEventListener("DOMContentLoaded", () => {
     });
     document.addEventListener("visibilitychange", scheduleGalleryAutoplay);
     mobileGalleryLayout.addEventListener("change", () => {
+      syncGalleryItems();
+      activeGallerySlideIndex = 0;
+      viewport.scrollLeft = 0;
+      if (!lightbox.hidden) {
+        selectedLightboxImage = galleryImages[0] || null;
+        lightboxImageIndex = 0;
+        syncLightboxImage();
+      }
       syncGallerySwipeHintVisibility();
       syncGalleryPagination();
-      syncGalleryZoom(activeGallerySlideIndex);
       scheduleGalleryAutoplay();
     });
     if ("IntersectionObserver" in window) {
@@ -2193,6 +2401,7 @@ document.addEventListener("DOMContentLoaded", () => {
       resetLightboxTransform();
       lightboxImage.src = sourceImage.currentSrc || sourceImage.src;
       lightboxImage.alt = sourceImage.alt;
+      lightboxImage.classList.toggle("is-mobile-mirrored", sourceImage.dataset.mobileFlip === "true");
       if (lightboxCurrent) lightboxCurrent.textContent = String(lightboxImageIndex + 1).padStart(2, "0");
       lightboxThumbnails.forEach((thumbnail, thumbnailIndex) => {
         thumbnail.setAttribute("aria-current", thumbnailIndex === lightboxImageIndex ? "true" : "false");
@@ -2205,7 +2414,7 @@ document.addEventListener("DOMContentLoaded", () => {
         });
       }
       syncLightboxThumbnailOverflow();
-      if (canAutoplay.matches && !lightbox.hidden) {
+      if (canAutoplay.matches && !lightbox.hidden && !(mobileGalleryLayout.matches && sourceImage.dataset.mobileFlip === "true")) {
         lightboxImage.animate([
           { opacity: 0.45, transform: "scale(1.012)" },
           { opacity: 1, transform: "scale(1)" },
@@ -2249,15 +2458,18 @@ document.addEventListener("DOMContentLoaded", () => {
     viewport.addEventListener("click", (event) => {
       if (event.target instanceof HTMLImageElement && event.target.matches("[data-gallery-image-index]")) openLightbox(event.target);
     });
-    galleryImages.forEach((image) => image.addEventListener("keydown", (event) => {
+    allGalleryImages.forEach((image) => image.addEventListener("keydown", (event) => {
       if (!["Enter", " "].includes(event.key)) return;
       event.preventDefault();
       openLightbox(image);
     }));
     lightboxPrevious?.addEventListener("click", () => showLightboxImage(lightboxImageIndex - 1));
     lightboxNext?.addEventListener("click", () => showLightboxImage(lightboxImageIndex + 1));
-    lightboxThumbnails.forEach((thumbnail, thumbnailIndex) => {
-      thumbnail.addEventListener("click", () => showLightboxImage(thumbnailIndex));
+    allLightboxThumbnails.forEach((thumbnail) => {
+      thumbnail.addEventListener("click", () => {
+        const thumbnailIndex = lightboxThumbnails.indexOf(thumbnail);
+        if (thumbnailIndex >= 0) showLightboxImage(thumbnailIndex);
+      });
     });
     lightboxCloseButtons.forEach((button) => button.addEventListener("click", closeLightbox));
     lightbox?.addEventListener("click", (event) => {
@@ -2352,6 +2564,20 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
+
+  const viewedProduct = document.querySelector("[data-viewed-product]")?.dataset.viewedProduct;
+  if (viewedProduct) {
+    const cookieName = "bastion_recent_products";
+    const cookieValue = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`));
+    let previousProducts = [];
+    try {
+      previousProducts = cookieValue ? decodeURIComponent(cookieValue.slice(cookieName.length + 1)).split(",") : [];
+    } catch {
+      previousProducts = [];
+    }
+    const recentProducts = [viewedProduct, ...previousProducts.filter((slug) => slug && slug !== viewedProduct)].slice(0, 13);
+    document.cookie = `${cookieName}=${encodeURIComponent(recentProducts.join(","))}; max-age=2592000; path=/; SameSite=Lax${window.location.protocol === "https:" ? "; Secure" : ""}`;
+  }
 
   document.querySelectorAll("[data-related-carousel]").forEach((carousel) => {
     const track = carousel.querySelector("[data-related-track]");
@@ -4003,11 +4229,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const label = button.querySelector(".product-share-label");
     const initialLabel = label?.textContent || "Поделиться";
     const shareUrl = button.dataset.shareUrl || window.location.href;
+    const productTitle = button.dataset.shareTitle || document.title;
+    const shareMessage = button.dataset.shareTitle
+      ? `Посмотрите дверь «${button.dataset.shareTitle}» на fedosikser.github.io`
+      : "Посмотрите на fedosikser.github.io";
+    const shareText = `${shareUrl}\n${shareMessage}`;
     let resetTimer = 0;
     const showCopiedState = () => {
       window.clearTimeout(resetTimer);
       button.classList.add("is-copied");
-      if (label) label.textContent = "Ссылка готова";
+      if (label) label.textContent = "Скопировано";
       resetTimer = window.setTimeout(() => {
         button.classList.remove("is-copied");
         if (label) label.textContent = initialLabel;
@@ -4016,14 +4247,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const copyShareUrl = async () => {
       if (navigator.clipboard?.writeText) {
         try {
-          await navigator.clipboard.writeText(shareUrl);
+          await navigator.clipboard.writeText(shareText);
           return;
         } catch {
           // Fall through to the selection-based copy for restricted browsers.
         }
       }
       const input = document.createElement("textarea");
-      input.value = shareUrl;
+      input.value = shareText;
       input.setAttribute("readonly", "");
       input.style.position = "fixed";
       input.style.opacity = "0";
@@ -4034,14 +4265,13 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     button.addEventListener("click", async () => {
-      const productTitle = button.dataset.shareTitle || document.title;
       const shareData = {
-        title: `${productTitle} — Alexandrov.by`,
-        text: button.dataset.shareTitle ? `Посмотрите дверь «${button.dataset.shareTitle}» на Alexandrov.by` : `Посмотрите на Alexandrov.by`,
+        title: `${productTitle} — fedosikser.github.io`,
+        text: shareMessage,
         url: shareUrl,
       };
       try {
-        if (navigator.share) {
+        if (navigator.share && window.matchMedia("(max-width: 620px) and (pointer: coarse)").matches) {
           await navigator.share(shareData);
           return;
         }
@@ -4372,8 +4602,11 @@ document.addEventListener("DOMContentLoaded", () => {
         button.classList.remove("is-submitting");
         button.classList.add("is-success");
         button.removeAttribute("aria-busy");
-        label.textContent = "Заявка отправлена";
+        label.textContent = "Демо: заявка не отправлена";
       }, 1900);
+    });
+    form.querySelectorAll("input:disabled, select:disabled, textarea:disabled, button[type='submit']:disabled").forEach((control) => {
+      control.disabled = false;
     });
   });
 
