@@ -3499,6 +3499,14 @@ body.admin-bar.single-product .product-main {
 .related-grid::-webkit-scrollbar {
   display: none;
 }
+.recently-viewed-empty {
+  margin: 0 0 18px;
+  color: var(--muted);
+  font: 400 16px/1.5 var(--font-sans);
+}
+.recently-viewed [hidden] {
+  display: none !important;
+}
 @media (hover: none), (pointer: coarse) {
   .related-controls {
     display: none;

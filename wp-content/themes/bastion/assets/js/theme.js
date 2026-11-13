@@ -2567,6 +2567,47 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const viewedProduct = document.querySelector("[data-viewed-product]")?.dataset.viewedProduct;
   if (viewedProduct) {
+    const recentlyViewed = document.querySelector("[data-recently-viewed]");
+    const recentTrack = recentlyViewed?.querySelector("[data-related-track]");
+    const currentCard = recentlyViewed?.querySelector("[data-recent-current-card]")?.content.querySelector(".product-card");
+    const storageKey = "bastion_recent_product_cards_v1";
+    const maxAge = 30 * 24 * 60 * 60 * 1000;
+    let savedCards = [];
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(storageKey) || "[]");
+      if (Array.isArray(stored)) {
+        savedCards = stored.filter((item) => item && /^d\d{5}$/.test(item.slug) && typeof item.html === "string" && Date.now() - item.viewedAt < maxAge);
+      }
+    } catch {
+      savedCards = [];
+    }
+    if (recentTrack && currentCard) {
+      const serverCards = Array.from(recentTrack.querySelectorAll(".product-card")).map((card) => ({
+        slug: card.dataset.productSlug,
+        html: card.outerHTML,
+        viewedAt: Date.now(),
+      }));
+      const previousCards = [...savedCards, ...serverCards].filter((item, index, all) =>
+        item.slug !== viewedProduct && all.findIndex((candidate) => candidate.slug === item.slug) === index
+      ).slice(0, 12);
+      recentTrack.replaceChildren();
+      previousCards.forEach((item) => {
+        const cardTemplate = document.createElement("template");
+        cardTemplate.innerHTML = item.html;
+        const card = cardTemplate.content.querySelector(".product-card");
+        if (card) recentTrack.append(card);
+      });
+      recentlyViewed.querySelector("[data-recently-viewed-empty]").hidden = recentTrack.childElementCount > 0;
+      recentlyViewed.querySelector(".related-controls").hidden = recentTrack.childElementCount < 2;
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify([
+          { slug: viewedProduct, html: currentCard.outerHTML, viewedAt: Date.now() },
+          ...previousCards,
+        ]));
+      } catch {
+        // Browsers with disabled storage can still use the server-rendered history.
+      }
+    }
     const cookieName = "bastion_recent_products";
     const cookieValue = document.cookie.split(";").map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`));
     let previousProducts = [];
